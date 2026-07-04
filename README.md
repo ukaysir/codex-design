@@ -1,1 +1,143 @@
-# codex-design
+# DesignForge
+
+DesignForge is a local Windows desktop scaffold for a Codex-powered UI generation workflow. The current MVP is chat-first: the user types a design request, and the app automatically creates or opens a workspace, seeds `DESIGN.md` from the `claude-design.md` workflow, writes a structured prompt, runs Codex, verifies the generated workspace, and opens a preview.
+
+## Current MVP
+
+- Tauri v2 app shell with React, TypeScript, Vite, and Tailwind CSS
+- Chat-first desktop tool layout with automatic pipeline status and persistent logs
+- Workspace create/open flow
+- Starter workspace file generation
+- Workspace-scoped file list/read/write commands
+- `claude-design.md`-priority prompt compiler driven from chat
+- Codex CLI check and `codex exec` runner
+- One-pass automatic repair when generated workspace verification fails
+- Run history persisted to `.designforge/runs.jsonl`
+- Chat feedback memory persisted to `.designforge/comments.jsonl`
+- Element comment anchors indexed at `.designforge/anchors.json`
+- Generated workspace typecheck/build command
+- Workspace Vite preview controls
+- Preview status manifest at `.designforge/preview.json`, including HTTP health status
+- Headless browser screenshot capture at `outputs/screenshots/latest.png`
+- Headless browser console capture at `outputs/console/latest.json`
+- Screenshot-driven critique prompt at `prompts/critique-latest.md`
+- Critique manifest at `.designforge/critique.json`
+- Automatic Codex critique pass after screenshot capture, with rollback if verification breaks
+- Automatic implementation handoff notes at `outputs/handoff/README.md`
+- Handoff zip export at `outputs/exports/designforge-handoff.zip`
+- Recent run action to reveal exported handoff zip in Explorer
+- Settings persisted in local storage
+
+## Install
+
+```powershell
+npm install
+```
+
+Tauri desktop builds also require Rust/Cargo, WebView2, and Visual Studio Build Tools with VC++ + Windows SDK:
+
+```powershell
+cargo --version
+```
+
+If Cargo is missing, install Rust from rustup before running Tauri commands. If `cargo check` cannot find `link.exe` or `msvcrt.lib`, repair/install the Visual Studio Build Tools VC++ workload from an elevated installer.
+
+## Run
+
+Frontend-only development:
+
+```powershell
+node ./node_modules/vite/bin/vite.js --host 127.0.0.1 --port 1420
+```
+
+Tauri desktop development:
+
+```powershell
+node ./node_modules/@tauri-apps/cli/tauri.js dev
+```
+
+Production frontend build:
+
+```powershell
+node ./scripts/build.mjs
+```
+
+Windows package build after Rust is installed:
+
+```powershell
+node ./node_modules/@tauri-apps/cli/tauri.js build
+```
+
+## Codex CLI
+
+DesignForge assumes Codex CLI is already installed and logged in locally.
+
+```powershell
+codex --version
+```
+
+The app defaults to `codex` as the CLI path. Codex runs with:
+
+```txt
+codex exec -C <workspace> --sandbox workspace-write --ask-for-approval never --skip-git-repo-check
+```
+
+## Workspace
+
+On first chat, DesignForge creates or opens `designforge-workspace` unless a previous workspace is saved. The scaffold plus completed run outputs look like:
+
+```txt
+designforge-workspace/
+  AGENTS.md
+  CODEX_DESIGN.md
+  DESIGN.md
+  designforge.config.json
+  package.json
+  index.html
+  src/
+    main.tsx
+    App.tsx
+    generated/
+      Screen.tsx
+  assets/
+  artifacts/
+  prompts/
+    critique-latest.md
+    latest.md
+    repair-latest.md
+  outputs/
+    screenshots/
+    console/
+    exports/
+    handoff/
+  logs/
+  .designforge/
+    artifacts.json
+    anchors.json
+    comments.jsonl
+    critique.json
+    preview.json
+    runs.jsonl
+    settings.json
+```
+
+Existing files are not overwritten.
+
+## Limitations
+
+- Monaco is not included yet; the editor is a textarea.
+- Repair currently runs once per chat request.
+- Screenshot-driven critique runs only when screenshot capture succeeds; otherwise the app records a no-screenshot critique manifest.
+- Element-level feedback uses `@anchor-name` references from `.designforge/anchors.json`.
+- Preview process, HTTP status, screenshot evidence, and console evidence are recorded.
+- Handoff export uses Windows PowerShell `Compress-Archive`.
+- Screenshot capture requires Microsoft Edge or Chrome headless CLI.
+- Console capture requires Microsoft Edge or Chrome headless CLI.
+- Codex output is captured after completion, not streamed.
+- File commands are workspace-scoped, but stronger process sandboxing still belongs in a later pass.
+- Frontend typecheck/build is verified. Rust/Cargo is installed here, but full Tauri `cargo check` is blocked until the local Visual Studio Build Tools install provides the missing VC runtime library.
+
+## Next Steps
+
+1. Add richer screenshot inspection metadata when Codex CLI exposes it directly.
+2. Add richer export formats.
