@@ -21,7 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ClipboardEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   buildCritiquePrompt,
@@ -412,6 +412,50 @@ function safeAttachmentName(name: string) {
 
 function attachmentRelativePath(id: string, name: string) {
   return `${ATTACHMENTS_DIR}/${id}-${safeAttachmentName(name)}`;
+}
+
+function extensionForMediaType(mediaType: string) {
+  const subtype = mediaType.split("/")[1]?.split(";")[0]?.toLowerCase();
+  if (!subtype) return "bin";
+  if (subtype === "jpeg") return "jpg";
+  if (subtype === "svg+xml") return "svg";
+  return subtype.replace(/[^a-z0-9]+/g, "") || "bin";
+}
+
+function pastedAttachmentName(file: File, index: number) {
+  const prefix = file.type.startsWith("image/") ? "pasted-image" : "pasted-file";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${prefix}-${stamp}-${index}.${extensionForMediaType(file.type)}`;
+}
+
+function normalizeClipboardFile(file: File, index: number) {
+  if (file.name.trim()) return file;
+  return new File([file], pastedAttachmentName(file, index), {
+    type: file.type || "application/octet-stream",
+    lastModified: file.lastModified || Date.now(),
+  });
+}
+
+function clipboardAttachmentFiles(data: DataTransfer | null) {
+  if (!data) return [];
+
+  const files: File[] = [];
+  const seen = new Set<string>();
+  const addFile = (file: File | null, index: number) => {
+    if (!file) return;
+    const nextFile = normalizeClipboardFile(file, index);
+    const key = `${nextFile.name}:${nextFile.size}:${nextFile.type}:${nextFile.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    files.push(nextFile);
+  };
+
+  Array.from(data.items ?? []).forEach((item, index) => {
+    if (item.kind === "file") addFile(item.getAsFile(), index + 1);
+  });
+  Array.from(data.files ?? []).forEach((file, index) => addFile(file, files.length + index + 1));
+
+  return files;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -1169,7 +1213,7 @@ export default function App() {
     return unique;
   }
 
-  async function addPendingFiles(files: FileList | null) {
+  async function addPendingFiles(files: FileList | File[] | null, source: "picker" | "clipboard" = "picker") {
     const selected = Array.from(files ?? []);
     if (!selected.length || busy) return;
 
@@ -1213,10 +1257,21 @@ export default function App() {
       const saved = await saveAttachmentManifest(path, [...existing, ...nextAttachments]);
       setPendingAttachments((current) => [...current, ...nextAttachments]);
       await refreshFiles(path);
-      pushLog("success", `Attached ${nextAttachments.length} file(s). Total saved attachments: ${saved.length}.`);
+      pushLog(
+        "success",
+        `${source === "clipboard" ? "Pasted" : "Attached"} ${nextAttachments.length} file(s). Total saved attachments: ${saved.length}.`,
+      );
     } catch (error) {
       pushLog("error", `Could not attach file: ${textFromError(error)}`);
     }
+  }
+
+  async function pastePendingFiles(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = clipboardAttachmentFiles(event.clipboardData);
+    if (!files.length) return;
+
+    event.preventDefault();
+    await addPendingFiles(files, "clipboard");
   }
 
   function removePendingAttachment(id: string) {
@@ -3528,6 +3583,7 @@ ${effectiveRequest}`;
                   id="designforge-request"
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
+                  onPaste={(event) => void pastePendingFiles(event)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
                   }}
@@ -3537,6 +3593,7 @@ ${effectiveRequest}`;
                       ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
                       : "만들고 싶은걸 입력하세요"
                   }
+                  title="이미지를 복사한 뒤 Ctrl+V로 붙여넣을 수 있습니다."
                   disabled={busy}
                 />
                 {pendingAttachments.length ? (

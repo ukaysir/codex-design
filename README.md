@@ -22,6 +22,7 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 - Low-cost static source check at `.designforge/static-check.json`
 - Guided clarification flow that produces one strong design artifact by default
 - Chat attachments for image, text, Markdown, and other local source files, persisted under `.designforge/attachments/`
+- Clipboard image/file paste in the chat composer through Ctrl+V, using the same attachment pipeline
 - Component-level edit flow through preview click selection or anchor-list selection with `@anchor` and `<mentioned-element>` context
 - Direct source splice for exact anchored text replacements before invoking Codex
 - Codex CLI check, `codex app-server` wrapper runner, live event stream, and `codex exec` fallback
