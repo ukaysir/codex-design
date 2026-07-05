@@ -8,8 +8,9 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 
 - Tauri v2 app shell with React, TypeScript, Vite, and Tailwind CSS
 - Chat-first DesignForge workbench with request intake, preview surface, pipeline evidence, artifacts, run history, quality evidence, and export actions
-- Workspace create/open flow
+- Project create/open flow with a side-panel project switcher
 - Starter workspace file generation
+- Project-scoped chat history, activity log, run history, `DESIGN.md`, prompts, generated artifact, preview evidence, and exports
 - Workspace-scoped file list/read/write commands
 - `claude-design.md`-informed prompt compiler without exposing that source prompt to generated workspaces
 - Persistent `DESIGN.md` design-system behavior with health inspection and repair scaffolding
@@ -29,6 +30,7 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 - Manual implementation handoff notes at `outputs/handoff/README.md`
 - Manual handoff zip export at `outputs/exports/designforge-handoff.zip`
 - Run history persisted to `.designforge/runs.jsonl`
+- Work activity persisted separately to `.designforge/activity.jsonl` so chat and task logs do not mix
 - Chat feedback memory persisted to `.designforge/comments.jsonl`
 - Element comment anchors indexed at `.designforge/anchors.json`
 - Recent run action to reveal exported handoff zip in Explorer
@@ -95,52 +97,58 @@ On Windows, DesignForge starts Codex with `--sandbox danger-full-access` because
 
 Long prompts are not passed directly as command-line arguments. DesignForge writes the full prompt to `.designforge/codex-prompts/latest.md` and sends Codex a short instruction to read that file, avoiding Windows `os error 206`.
 
-The `새 디자인 시작` control resets the current workspace design state: chat, run history, DesignForge manifests, `DESIGN.md`, `src/generated/Screen.tsx`, and shared generated styles return to the starter state before the next run.
+The `새 프로젝트 만들기` control creates a new project directory under the internal `designforge-workspace` root and switches to it. It does not delete the previous project's chat, activity log, run history, `DESIGN.md`, generated screen, prompts, or outputs. The folder icon opens a project side panel; selecting an older project switches DesignForge back to that directory and reloads its existing design context.
 
 ## Workspace
 
-On first chat, DesignForge creates or opens `designforge-workspace` unless a previous workspace is saved. Existing files are not overwritten. The scaffold plus generated run outputs look like:
+On first chat, DesignForge opens the previous project if one is saved. Otherwise it creates a new project directory under the internal `designforge-workspace` root. Existing project files are not overwritten. The scaffold plus generated run outputs look like:
 
 ```txt
 designforge-workspace/
-  AGENTS.md
-  CODEX_DESIGN.md
-  DESIGN.md
-  designforge.config.json
-  package.json
-  index.html
-  src/
-    main.tsx
-    App.tsx
-    generated/
-      Screen.tsx
-  assets/
-  artifacts/
-  prompts/
-    clarification-latest.md
-    latest.md
-    repair-latest.md
-    critique-latest.md
-    quality-latest.md
-  outputs/
-    screenshots/
-    console/
-    exports/
-    handoff/
-  logs/
-  .designforge/
-    artifacts.json
-    anchors.json
-    clarification.json
-    brief.json
-    comments.jsonl
-    context.json
-    critique.json
-    preview.json
-    quality-audit.json
-    runs.jsonl
-    settings.json
+  <project-name>-<timestamp>/
+    AGENTS.md
+    CODEX_DESIGN.md
+    DESIGN.md
+    designforge.config.json
+    package.json
+    index.html
+    src/
+      main.tsx
+      App.tsx
+      generated/
+        Screen.tsx
+    assets/
+    artifacts/
+    prompts/
+      clarification-latest.md
+      latest.md
+      repair-latest.md
+      critique-latest.md
+      quality-latest.md
+    outputs/
+      screenshots/
+      console/
+      exports/
+      handoff/
+    logs/
+    .designforge/
+      project.json
+      artifacts.json
+      anchors.json
+      activity.jsonl
+      clarification.json
+      brief.json
+      chat.jsonl
+      comments.jsonl
+      context.json
+      critique.json
+      preview.json
+      quality-audit.json
+      runs.jsonl
+      settings.json
 ```
+
+Existing legacy `designforge-workspace/` directories that already contain `DESIGN.md` are still listed as projects. New projects are created as child directories and nested project directories are skipped during file indexing so project state does not leak across contexts.
 
 ## Default Chat Run
 
@@ -159,6 +167,8 @@ The default chat path is intentionally narrow:
 11. Refresh files and generated artifacts.
 12. Index `data-comment-anchor` values.
 13. Append a run record.
+
+Chat messages are written to `.designforge/chat.jsonl`. Tool/status work activity is written to `.designforge/activity.jsonl`. The UI shows them in separate conversation and work-log tabs.
 
 The app does not automatically verify, preview, capture, critique, quality-audit, handoff, or export after every chat request.
 

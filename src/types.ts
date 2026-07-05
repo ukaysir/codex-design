@@ -13,6 +13,16 @@ export type WorkspaceInfo = {
   name: string;
 };
 
+export type ProjectInfo = {
+  path: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  chatCount: number;
+  runCount: number;
+  lastMessage?: string;
+};
+
 export type WorkspaceFile = {
   relativePath: string;
   isDirectory: boolean;
@@ -215,6 +225,7 @@ export type CommentRecord = {
 
 export type Settings = {
   defaultWorkspaceDir: string;
+  defaultProjectRootDir: string;
   codexPath: string;
   packageManager: "npm" | "pnpm" | "bun";
   lastWorkspacePath: string;

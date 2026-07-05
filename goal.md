@@ -22,10 +22,20 @@ Correction pass completed on 2026-07-05 14:30 +09:00.
 - Fixed Windows Codex `os error 206` long-command failures by writing full prompts to `.designforge/codex-prompts/latest.md` and passing a short file-read instruction to `codex exec`.
 - Fixed Windows Codex `workspace-write` sandbox process-launch failures (`CreateProcessAsUserW failed: 5`) by starting Codex runs with `danger-full-access` on Windows.
 - Forced Windows Codex runs to prefer PowerShell 7 (`pwsh.exe`) through `windows.shell_path` and PATH prepending, avoiding Windows PowerShell 5.1 command-launch failures.
-- Expanded `새 디자인 시작` so it clears the prior design system, generated screen, generated styles, manifests, chat, and run history instead of only resetting the Codex session.
+- Superseded the earlier `새 디자인 시작` reset behavior in the later project-isolation pass; new design work now creates or switches project directories instead of clearing prior state.
 - Preserved the original request after preflight failure so a follow-up like "진행해" continues from the original long request instead of replacing it.
 - Re-verified workspace TypeScript/Vite commands, TypeScript, frontend build, Rust check, Clippy, Knip, and Tauri release packaging.
 - Latest release build after the `os error 206` fix completed on 2026-07-05 14:40 +09:00.
+
+Project isolation and design-quality pass completed on 2026-07-05.
+
+- Replaced the destructive `새 디자인 시작` reset UI with `새 프로젝트 만들기`.
+- New projects are created as directories under the internal `designforge-workspace` root.
+- Added a folder-button project side panel for opening previous project directories and continuing their `DESIGN.md`, generated screen, chat context, and run history.
+- Split conversation chat into `.designforge/chat.jsonl` and tool/status work activity into `.designforge/activity.jsonl`.
+- Added project metadata, project listing, and nested-project indexing guards in the Tauri backend.
+- Re-read `claude-design.md` through 10 quality lenses and encoded those lenses in prompt compilation, preflight questions, `DESIGN.md` seed generation, health scoring, starter workspace instructions, and quality audit prompts.
+- Added `diff.md` as the durable comparison and upgrade report.
 
 ## Principles
 
@@ -35,6 +45,8 @@ Correction pass completed on 2026-07-05 14:30 +09:00.
 - Preserve targeted-edit discipline: small requests should not cause broad redesigns.
 - Store durable evidence in workspace files so later turns improve from prior context.
 - Keep documentation aligned with actual app behavior.
+- Never clear prior projects to start a new design; create or switch project directories instead.
+- Treat natural-language design requests as input to a repeatable design-quality decision loop, not just code generation.
 
 ## Ordered Implementation Plan
 
@@ -126,6 +138,11 @@ Completed:
 - Rust check: `cargo check --manifest-path src-tauri/Cargo.toml`
 - Rust clippy: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
 - Tauri release build: `node ./node_modules/@tauri-apps/cli/tauri.js build`
+
+Current pass verification:
+
+- TypeScript check: `node ./node_modules/typescript/bin/tsc --noEmit`
+- Rust check: `cargo check --manifest-path src-tauri/Cargo.toml`
 
 ## Non-Goals
 

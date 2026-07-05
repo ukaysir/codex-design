@@ -15,6 +15,19 @@ export type PromptOptions = {
   generationMode?: GenerationMode;
 };
 
+const DESIGN_QUALITY_LENSES = [
+  "1. Request fit: identify the artifact type, fidelity, audience, constraints, and whether the user wants one direction or variations.",
+  "2. Source truth: inspect provided assets, design systems, UI kits, code, screenshots, and prior chat before inventing visual rules.",
+  "3. System first: lock purpose, tone, differentiation, typography, color, spacing, component vocabulary, motion, and content rules in DESIGN.md before broad UI changes.",
+  "4. Content economy: every section must earn its place; no filler, fake metrics, generic stats, or extra material the user did not ask for.",
+  "5. Visual distinctiveness: commit to a memorable aesthetic direction and avoid timid generic SaaS defaults, overused fonts, emoji-by-default, and left-border accent cards.",
+  "6. Composition and scale: choose layout density, hierarchy, viewport size, responsive behavior, and type scale intentionally for the requested medium.",
+  "7. Interaction realism: include expected states, hover/focus/active behavior, validation, loading/empty/error states, and navigation when the request implies an interactive product.",
+  "8. Editability and anchors: preserve targeted edits, stable data-comment-anchor values, literal editable text, and semantic regions so later chat/comments can continue precisely.",
+  "9. Asset integrity: use real provided assets when available, copy only needed assets, do not invent logos/icons, and avoid copyrighted recreation unless the user has rights.",
+  "10. Verification and handoff: keep the output previewable, record assumptions/caveats, and document exact tokens/interactions/assets for implementation handoff.",
+].join("\n");
+
 const CODEX_DESIGN_PROTOCOL = [
   "Act as Codex Design: an expert frontend designer working for the user inside a filesystem project.",
   "Use claude-design.md as the product priority: design craft, context exploration, design-system grounding, one strong artifact, verification, and brief user-facing summaries.",
@@ -37,6 +50,7 @@ const CODEX_DESIGN_PROTOCOL = [
   "Use distinctive typography and color when no brand system constrains you; do not default to Inter/Arial-style blandness for generated designs.",
   "Use motion only when it improves state, rhythm, or comprehension, and include reduced-motion-safe behavior when adding CSS animations.",
   "Keep one primary artifact by default. Add files only when they materially improve preview, styling, assets, or design-system fidelity.",
+  `Apply this 10-lens design review before and after editing:\n${DESIGN_QUALITY_LENSES}`,
 ].join("\n- ");
 
 export function buildStructuredPrompt(userRequest: string, options: PromptOptions = {}) {
@@ -72,6 +86,9 @@ ${options.contextSummary?.trim() || "(context manifest unavailable)"}
 Clarification analysis:
 ${options.clarificationContext?.trim() || "(clarification analysis unavailable)"}
 
+Design quality lenses to apply:
+${DESIGN_QUALITY_LENSES}
+
 Autonomous workflow:
 1. Understand the request and infer missing context without asking the user.
 2. Classify the request before editing:
@@ -82,10 +99,11 @@ Autonomous workflow:
 4. For system revisions, update ${designSystemPath} first, then revise ${artifactPath} within the same visual system.
 5. For fresh designs only, replace the screen direction deliberately and record the new system in ${designSystemPath}.
 6. Keep ${designSystemPath} as the durable source of truth, including component inventory, anchor map, tokens, patterns, assumptions, and revision notes.
-7. Update src/styles.css only when the design needs shared font imports, CSS variables, keyframes, or global reset support.
-8. Keep generated work previewable with the existing Vite React app.
-9. Use stable kebab-case data-comment-anchor values on important regions such as hero, navigation, primary-action, feature-list, pricing, form, preview, and footer.
-10. Summarize changed files, assumptions, and verification performed.
+7. Before coding a broad change, write concrete decisions for all 10 design quality lenses into ${designSystemPath}.
+8. Update src/styles.css only when the design needs shared font imports, CSS variables, keyframes, or global reset support.
+9. Keep generated work previewable with the existing Vite React app.
+10. Use stable kebab-case data-comment-anchor values on important regions such as hero, navigation, primary-action, feature-list, pricing, form, preview, and footer.
+11. Summarize changed files, assumptions, and verification performed.
 
 Generation mode:
 - Current mode: ${generationMode}
@@ -164,12 +182,15 @@ ${options.contextSummary?.trim() || "(context manifest unavailable)"}
 Recent feedback:
 ${options.recentFeedback?.trim() || "(none)"}
 
+Design quality lenses to check before deciding questions:
+${DESIGN_QUALITY_LENSES}
+
 Decision rules:
 - For small targeted edits, set shouldAskQuestions=false unless the selected element/source is unclear.
 - For new screens, redesigns, vague product requests, unclear audience, missing brand/design-system direction, missing assets, or variation requests, set shouldAskQuestions=true.
-- Ask 4-8 questions when needed. More is okay only if the request is broad and under-specified.
+- Ask 6-10 questions when needed. For broad new projects, prefer 10 focused questions if they materially improve design quality.
 - Every question must include a reason in "why" showing how the answer changes design decisions.
-- Prefer concrete design-system questions: audience, brand/source of truth, visual direction, content proof, interaction states, assets, density, variation axis, constraints.
+- Prefer concrete design-system questions: audience, brand/source of truth, visual direction, content proof, interaction states, assets, density, variation axis, constraints, expected states, responsive target, editability, and handoff needs.
 - Do not ask questions whose answers are already clear from the request, DESIGN.md, or context manifest.
 - If enough context exists, explain the assumptions in assumptionsIfSkipped.
 
@@ -227,6 +248,36 @@ Name the one visual or interaction idea the user should remember.
 - Useful content only: every section earns its place.
 - System continuity: repeated controls, cards, spacing, type, and tone follow the same vocabulary.
 - Implementation fidelity: responsive constraints, readable text, visible focus, and accessible controls.
+
+## Design Quality Lenses
+
+Use these ten checks before and after broad changes:
+
+${DESIGN_QUALITY_LENSES}
+
+## Interaction and State Model
+
+- Define expected hover, active, focus, loading, empty, error, success, and disabled states when the surface implies product interaction.
+- Prototype enough behavior to make the design feel real, but keep generated code previewable and easy to edit.
+- Motion should support comprehension, rhythm, or state change and must respect reduced-motion users.
+
+## Responsive Rules
+
+- Name the primary viewport and any fixed canvas requirement before coding.
+- Text must fit without overlap at desktop and smaller widths.
+- Use stable flex/grid constraints, explicit gaps, and intentional density rather than accidental wrapping.
+
+## Asset and Source Policy
+
+- Use real provided assets, code, or design-system evidence as the source of truth.
+- Do not invent logos, fake icons, fake metrics, or copyrighted UI details.
+- If a needed asset is missing, record the assumption and design a neutral placeholder that does not pretend to be final brand material.
+
+## Editability and Anchors
+
+- Keep user-visible copy literal and easy to revise where practical.
+- Preserve existing data-comment-anchor values and add stable anchors for major semantic regions.
+- For targeted edits, change only the requested region and leave unrelated layout, spacing, type, colors, and copy intact.
 
 ## Component Inventory
 
@@ -389,11 +440,14 @@ Evidence:
 - Screenshot: ${screenshotPath ?? "(not captured)"}
 - Console evidence: ${options.consolePath ?? "(not captured)"}
 
+Design quality lenses:
+${DESIGN_QUALITY_LENSES}
+
 Original user request:
 ${userRequest.trim() || "Create a focused frontend screen."}
 
 Quality audit task:
-1. Score the design from 0-100 across: hierarchy, aesthetic specificity, spacing rhythm, typography, color discipline, content usefulness, interaction clarity, accessibility, responsiveness, and system continuity.
+1. Score the design from 0-100 across the 10 design quality lenses plus hierarchy, typography, color discipline, accessibility, and implementation fidelity.
 2. If the score is below 85 or there are clear defects, make focused improvements to ${artifactPath}, ${designSystemPath}, and src/styles.css as needed.
 3. Do not invent fake business metrics or filler sections.
 4. Do not change unrelated shell/scaffold files.

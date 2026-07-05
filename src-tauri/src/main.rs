@@ -22,6 +22,18 @@ struct WorkspaceInfo {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ProjectInfo {
+    path: String,
+    name: String,
+    created_at: String,
+    updated_at: String,
+    chat_count: usize,
+    run_count: usize,
+    last_message: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WorkspaceFile {
     relative_path: String,
     is_directory: bool,
@@ -88,6 +100,61 @@ fn open_workspace(path: String) -> Result<WorkspaceInfo, String> {
 }
 
 #[tauri::command]
+fn create_project(project_root_path: String, name: Option<String>) -> Result<ProjectInfo, String> {
+    let root = PathBuf::from(clean_input(&project_root_path));
+    fs::create_dir_all(&root).map_err(|error| format!("Could not create project root: {error}"))?;
+    let root = fs::canonicalize(root).map_err(|error| format!("Could not resolve project root: {error}"))?;
+    if !root.is_dir() {
+        return Err("Project root path is not a directory.".into());
+    }
+
+    let display_name = clean_project_name(name.as_deref());
+    let slug = slugify_project_name(&display_name);
+    let project_dir = unique_project_dir(&root, &slug);
+    fs::create_dir_all(&project_dir).map_err(|error| format!("Could not create project directory: {error}"))?;
+    create_default_files(&project_dir)?;
+    write_project_manifest(&project_dir, &display_name)?;
+    project_info(project_dir)
+}
+
+#[tauri::command]
+fn list_projects(project_root_path: String) -> Result<Vec<ProjectInfo>, String> {
+    let root = PathBuf::from(clean_input(&project_root_path));
+    fs::create_dir_all(&root).map_err(|error| format!("Could not create project root: {error}"))?;
+    let root = fs::canonicalize(root).map_err(|error| format!("Could not resolve project root: {error}"))?;
+    if !root.is_dir() {
+        return Err("Project root path is not a directory.".into());
+    }
+
+    let mut projects: Vec<(u64, ProjectInfo)> = Vec::new();
+    if is_design_project_dir(&root) {
+        if let Ok(info) = project_info(root.clone()) {
+            projects.push((seconds_since_epoch(project_updated_time(&root)), info));
+        }
+    }
+
+    for entry in fs::read_dir(&root).map_err(|error| format!("Could not list project root: {error}"))? {
+        let entry = entry.map_err(|error| format!("Could not read project entry: {error}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Could not read project entry type: {error}"))?;
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if !is_design_project_dir(&path) {
+            continue;
+        }
+        if let Ok(info) = project_info(path.clone()) {
+            projects.push((seconds_since_epoch(project_updated_time(&path)), info));
+        }
+    }
+
+    projects.sort_by_key(|item| std::cmp::Reverse(item.0));
+    Ok(projects.into_iter().map(|(_, info)| info).collect())
+}
+
+#[tauri::command]
 fn reset_workspace_design_state(workspace_path: String) -> Result<(), String> {
     let root = canonical_workspace(&workspace_path)?;
     write_starter_file(root.join("DESIGN.md"), DESIGN_MD)?;
@@ -98,6 +165,7 @@ fn reset_workspace_design_state(workspace_path: String) -> Result<(), String> {
     write_starter_file(root.join(".designforge/comments.jsonl"), "")?;
     write_starter_file(root.join(".designforge/runs.jsonl"), "")?;
     write_starter_file(root.join(".designforge/chat.jsonl"), "")?;
+    write_starter_file(root.join(".designforge/activity.jsonl"), "")?;
 
     for relative_path in [
         ".designforge/brief.json",
@@ -673,6 +741,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             create_workspace,
             open_workspace,
+            create_project,
+            list_projects,
             reset_workspace_design_state,
             list_workspace_files,
             read_file,
@@ -745,6 +815,183 @@ fn workspace_info(root: PathBuf) -> Result<WorkspaceInfo, String> {
         path: root.to_string_lossy().to_string(),
         name,
     })
+}
+
+fn project_info(root: PathBuf) -> Result<ProjectInfo, String> {
+    if !root.is_dir() {
+        return Err("Project path is not a directory.".into());
+    }
+    let created_at = seconds_string(project_created_time(&root));
+    let updated_at = seconds_string(project_updated_time(&root));
+    let chat_count = jsonl_count(root.join(".designforge/chat.jsonl"));
+    let activity_count = jsonl_count(root.join(".designforge/activity.jsonl"));
+    let run_count = jsonl_count(root.join(".designforge/runs.jsonl"));
+    let last_message =
+        last_jsonl_content(root.join(".designforge/chat.jsonl")).or_else(|| last_run_request(root.join(".designforge/runs.jsonl")));
+    Ok(ProjectInfo {
+        path: root.to_string_lossy().to_string(),
+        name: project_display_name(&root),
+        created_at,
+        updated_at,
+        chat_count: chat_count + activity_count,
+        run_count,
+        last_message,
+    })
+}
+
+fn clean_project_name(value: Option<&str>) -> String {
+    let trimmed = value.unwrap_or("").trim();
+    if trimmed.is_empty() {
+        "Untitled DesignForge Project".into()
+    } else {
+        trimmed.chars().take(80).collect()
+    }
+}
+
+fn slugify_project_name(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_dash = false;
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character.to_ascii_lowercase());
+            previous_dash = false;
+        } else if !previous_dash {
+            slug.push('-');
+            previous_dash = true;
+        }
+    }
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        "design-project".into()
+    } else {
+        slug.chars().take(48).collect()
+    }
+}
+
+fn unique_project_dir(root: &Path, slug: &str) -> PathBuf {
+    let timestamp = unix_seconds();
+    let base = format!("{slug}-{timestamp}");
+    let mut candidate = root.join(&base);
+    let mut index = 2;
+    while candidate.exists() {
+        candidate = root.join(format!("{base}-{index}"));
+        index += 1;
+    }
+    candidate
+}
+
+fn write_project_manifest(root: &Path, name: &str) -> Result<(), String> {
+    let path = root.join(".designforge/project.json");
+    let now = unix_seconds().to_string();
+    let manifest = serde_json::json!({
+        "name": name,
+        "createdAt": now,
+        "updatedAt": now
+    });
+    write_starter_file(
+        path,
+        &serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("Could not serialize project manifest: {error}"))?,
+    )
+}
+
+fn is_design_project_dir(path: &Path) -> bool {
+    path.join("designforge.config.json").is_file()
+        || path.join("DESIGN.md").is_file()
+        || path.join(".designforge/runs.jsonl").is_file()
+}
+
+fn project_display_name(root: &Path) -> String {
+    for relative_path in [".designforge/project.json", "designforge.config.json"] {
+        let path = root.join(relative_path);
+        let Ok(raw) = fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        let Some(name) = value.get("name").and_then(|item| item.as_str()) else {
+            continue;
+        };
+        if !name.trim().is_empty() && name != "Untitled DesignForge Project" {
+            return name.trim().to_string();
+        }
+    }
+
+    root.file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("DesignForge Project")
+        .to_string()
+}
+
+fn project_created_time(root: &Path) -> SystemTime {
+    root.metadata()
+        .and_then(|metadata| metadata.created().or_else(|_| metadata.modified()))
+        .unwrap_or(UNIX_EPOCH)
+}
+
+fn project_updated_time(root: &Path) -> SystemTime {
+    [
+        ".designforge/chat.jsonl",
+        ".designforge/activity.jsonl",
+        ".designforge/runs.jsonl",
+        ".designforge/brief.json",
+        ".designforge/context.json",
+        "DESIGN.md",
+        "src/generated/Screen.tsx",
+    ]
+    .iter()
+    .filter_map(|relative_path| root.join(relative_path).metadata().ok()?.modified().ok())
+    .max()
+    .unwrap_or_else(|| root.metadata().and_then(|metadata| metadata.modified()).unwrap_or(UNIX_EPOCH))
+}
+
+fn seconds_string(time: SystemTime) -> String {
+    seconds_since_epoch(time).to_string()
+}
+
+fn seconds_since_epoch(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn jsonl_count(path: PathBuf) -> usize {
+    fs::read_to_string(path)
+        .map(|raw| raw.lines().filter(|line| !line.trim().is_empty()).count())
+        .unwrap_or(0)
+}
+
+fn last_jsonl_content(path: PathBuf) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    for line in raw.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+        let content = value.get("content").and_then(|item| item.as_str())?.trim();
+        if !content.is_empty() {
+            return Some(content.chars().take(180).collect());
+        }
+    }
+    None
+}
+
+fn last_run_request(path: PathBuf) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    for line in raw.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+        let request = value.get("request").and_then(|item| item.as_str())?.trim();
+        if !request.is_empty() {
+            return Some(request.chars().take(180).collect());
+        }
+    }
+    None
 }
 
 fn canonical_workspace(path: &str) -> Result<PathBuf, String> {
@@ -849,11 +1096,10 @@ fn walk_files(root: &Path, dir: &Path, files: &mut Vec<WorkspaceFile>) -> Result
 }
 
 fn should_skip_dir(path: &Path) -> bool {
-    // ponytail: skip common heavy dirs; make this configurable only if users need them.
     matches!(
         path.file_name().and_then(|value| value.to_str()),
         Some(".git" | "node_modules" | "target" | "dist")
-    )
+    ) || is_design_project_dir(path)
 }
 
 fn preview_url() -> String {
@@ -1021,6 +1267,8 @@ fn create_default_files(root: &Path) -> Result<(), String> {
     write_if_missing(root.join(".designforge/anchors.json"), ANCHORS_JSON)?;
     write_if_missing(root.join(".designforge/comments.jsonl"), "")?;
     write_if_missing(root.join(".designforge/runs.jsonl"), "")?;
+    write_if_missing(root.join(".designforge/chat.jsonl"), "")?;
+    write_if_missing(root.join(".designforge/activity.jsonl"), "")?;
     write_if_missing(
         root.join(".designforge/settings.json"),
         WORKSPACE_SETTINGS_JSON,
@@ -1085,11 +1333,14 @@ fn handoff_files() -> &'static [&'static str] {
         "outputs/screenshots/latest.png",
         "outputs/console/latest.json",
         "outputs/handoff/README.md",
+        ".designforge/project.json",
         ".designforge/artifacts.json",
         ".designforge/anchors.json",
         ".designforge/clarification.json",
         ".designforge/brief.json",
         ".designforge/context.json",
+        ".designforge/chat.jsonl",
+        ".designforge/activity.jsonl",
         ".designforge/comments.jsonl",
         ".designforge/critique.json",
         ".designforge/quality-audit.json",
@@ -1367,6 +1618,7 @@ claude-design.md is the product behavior reference. Translate its design-agent w
 - Explore local context before editing.
 - Create or update the design system before generating UI.
 - Use .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json when present.
+- Translate natural-language requests into concrete design quality decisions before coding: request fit, source truth, system first, content economy, visual distinctiveness, composition/scale, interaction realism, editability/anchors, asset integrity, and verification/handoff.
 - Produce one strong artifact by default.
 - Keep heavy verification and preview stages compatible, but do not assume they have already run.
 - Keep the final user-facing summary brief.
@@ -1453,6 +1705,7 @@ DESIGN.md is the source of truth. Keep it concrete:
 - Tone and aesthetic direction
 - Differentiation: the memorable idea
 - Color, type, spacing, layout, components, motion, accessibility
+- Ten quality lenses: request fit, source truth, system first, content economy, visual distinctiveness, composition and scale, interaction realism, editability and anchors, asset integrity, verification and handoff
 - Content rules and assumptions
 - Component inventory and stable anchor map
 - Revision notes for future edits
@@ -1533,6 +1786,43 @@ Name the one visual or interaction idea the user should remember.
 - Useful content only: every section earns its place.
 - System continuity: repeated controls, cards, spacing, type, and tone follow the same vocabulary.
 - Implementation fidelity: responsive constraints, readable text, visible focus, and accessible controls.
+
+## Design Quality Lenses
+
+1. Request fit: identify artifact type, fidelity, audience, constraints, and option count.
+2. Source truth: inspect assets, code, design systems, screenshots, and prior chat before inventing visual rules.
+3. System first: lock purpose, tone, differentiation, typography, color, spacing, components, motion, and content rules before broad UI changes.
+4. Content economy: every section earns its place; no filler, fake metrics, or unrequested material.
+5. Visual distinctiveness: commit to a memorable aesthetic direction and avoid generic AI defaults.
+6. Composition and scale: choose layout density, hierarchy, viewport, responsive behavior, and type scale intentionally.
+7. Interaction realism: define hover, focus, active, loading, empty, error, validation, and navigation states when relevant.
+8. Editability and anchors: preserve targeted edits, stable data-comment-anchor values, literal text, and semantic regions.
+9. Asset integrity: use real provided assets, do not invent logos/icons, and avoid copyrighted recreation.
+10. Verification and handoff: keep output previewable, record assumptions/caveats, and document exact implementation details.
+
+## Interaction and State Model
+
+- Define hover, active, focus, loading, empty, error, success, and disabled states when the surface implies product interaction.
+- Prototype enough behavior to make the generated result feel real without making the code difficult to revise.
+- Use motion for comprehension, rhythm, or state change and respect reduced-motion preferences.
+
+## Responsive Rules
+
+- Name the primary viewport and any fixed canvas requirement before coding.
+- Ensure text, controls, and repeated items fit at desktop and narrower widths.
+- Use stable flex/grid constraints, explicit gaps, and intentional density.
+
+## Asset and Source Policy
+
+- Use provided assets, code, or design-system evidence as source of truth.
+- Do not invent logos, fake icons, fake metrics, or copyrighted UI details.
+- If assets are missing, record assumptions and use neutral placeholders.
+
+## Editability and Anchors
+
+- Keep user-visible copy literal and directly editable where practical.
+- Preserve existing data-comment-anchor values and add stable anchors for major semantic regions.
+- For targeted edits, change only the requested region and preserve unrelated layout, spacing, type, colors, and copy.
 
 ## Component Inventory
 

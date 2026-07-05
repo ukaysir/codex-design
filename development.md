@@ -12,7 +12,7 @@ The primary UI is **Chat**.
 
 The default chat path is light and design-focused:
 
-1. Create or open a local workspace.
+1. Create or open a project directory under the internal workspace root.
 2. Inspect existing files, assets, styles, generated artifact, and anchors.
 3. Inspect `DESIGN.md` health.
 4. Write `.designforge/context.json`.
@@ -28,7 +28,8 @@ The default chat path is light and design-focused:
 14. Refresh workspace files and generated artifact metadata.
 15. Index `data-comment-anchor` values into `.designforge/anchors.json`.
 16. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
-17. Append a run record to `.designforge/runs.jsonl`.
+17. Append tool/status work activity to `.designforge/activity.jsonl`.
+18. Append a run record to `.designforge/runs.jsonl`.
 
 Guided mode is the default conversation path. DesignForge does not use hardcoded questions. It runs an AI preflight after reading local context, then asks the questions produced by that preflight. If context is still missing after the user's answer, the agent records practical assumptions in `DESIGN.md` and proceeds.
 
@@ -63,12 +64,14 @@ DesignForge implements those ideas as app structure, not as visible navigation.
 - "Ask questions when needed" becomes guided mode: read files and context first, run AI preflight, ask tailored questions, then produce an artifact and record remaining assumptions or unresolved questions in the brief and `DESIGN.md`.
 - "Explore alternatives" becomes variation mode: produce three comparable directions in one artifact with stable variation anchors.
 - "Quality review" becomes a manual quality-audit pass with a score, findings, changes, and risks.
+- The latest quality pass adds a 10-lens design review loop derived from `claude-design.md`: request fit, source truth, system first, content economy, visual distinctiveness, composition and scale, interaction realism, editability and anchors, asset integrity, and verification/handoff.
 
 ## Current App Shape
 
 The app now has:
 
 - One chat input
+- Project side panel with create/switch actions
 - Generation mode controls
 - Component-level edit panel
 - Pipeline status
@@ -79,6 +82,7 @@ The app now has:
 - Clarification/preflight evidence
 - Quality audit evidence
 - Run history and export actions
+- Separate conversation and work-log tabs
 - System log
 - Preview click-selection bridge for anchored generated regions
 - Hidden workspace, prompt, Codex, verification, critique, and export machinery
@@ -89,43 +93,47 @@ The old feature navigation is intentionally removed. Workspace, Prompt Studio, F
 
 ```txt
 designforge-workspace/
-  AGENTS.md
-  CODEX_DESIGN.md
-  DESIGN.md
-  designforge.config.json
-  package.json
-  index.html
-  src/
-    main.tsx
-    App.tsx
-    generated/
-      Screen.tsx
-  assets/
-  artifacts/
-  prompts/
-    clarification-latest.md
-    latest.md
-    repair-latest.md
-    critique-latest.md
-    quality-latest.md
-  outputs/
-    screenshots/
-    console/
-    exports/
-    handoff/
-  logs/
-  .designforge/
-    artifacts.json
-    anchors.json
-    clarification.json
-    brief.json
-    comments.jsonl
-    context.json
-    critique.json
-    preview.json
-    quality-audit.json
-    runs.jsonl
-    settings.json
+  <project-name>-<timestamp>/
+    AGENTS.md
+    CODEX_DESIGN.md
+    DESIGN.md
+    designforge.config.json
+    package.json
+    index.html
+    src/
+      main.tsx
+      App.tsx
+      generated/
+        Screen.tsx
+    assets/
+    artifacts/
+    prompts/
+      clarification-latest.md
+      latest.md
+      repair-latest.md
+      critique-latest.md
+      quality-latest.md
+    outputs/
+      screenshots/
+      console/
+      exports/
+      handoff/
+    logs/
+    .designforge/
+      project.json
+      artifacts.json
+      anchors.json
+      activity.jsonl
+      clarification.json
+      brief.json
+      chat.jsonl
+      comments.jsonl
+      context.json
+      critique.json
+      preview.json
+      quality-audit.json
+      runs.jsonl
+      settings.json
 ```
 
 ## Artifact Model
@@ -162,6 +170,7 @@ The prompt compiler should always produce a deterministic prompt with:
 - selected-anchor rule: requests containing `@anchor` or `<mentioned-element>` edit that semantic region first
 - small-edit discipline
 - anti-slop rules
+- 10-lens design review rules translated from `claude-design.md`
 - accessibility and semantic HTML requirements
 - summary requirement
 
@@ -174,7 +183,20 @@ On each chat:
 - If `DESIGN.md` is already substantial, preserve it.
 - Codex may update `DESIGN.md` before editing the generated artifact.
 
-The design-system health gate should reward evidence of purpose, audience, visual direction, tokens, layout, components, interaction states, accessibility, responsive behavior, assets, quality bar, and revision notes.
+The design-system health gate should reward evidence of purpose, audience, visual direction, tokens, layout, components, interaction states, accessibility, responsive behavior, assets, quality bar, 10 quality lenses, editability/anchor policy, and revision notes.
+
+The 10 quality lenses are:
+
+1. Request fit
+2. Source truth
+3. System first
+4. Content economy
+5. Visual distinctiveness
+6. Composition and scale
+7. Interaction realism
+8. Editability and anchors
+9. Asset integrity
+10. Verification and handoff
 
 ## Design Brief And Context
 
@@ -225,7 +247,7 @@ The audit must inspect:
 - styles/config
 - optional screenshot and console evidence
 
-It scores the work from 0 to 100 across hierarchy, aesthetic specificity, spacing, typography, color, content usefulness, interaction clarity, accessibility, responsiveness, and design-system continuity. If the score is below the quality bar or defects are clear, it makes focused improvements. If the design is already strong, it writes a no-change verdict.
+It scores the work from 0 to 100 across the 10 quality lenses plus hierarchy, typography, color discipline, accessibility, and implementation fidelity. If the score is below the quality bar or defects are clear, it makes focused improvements. If the design is already strong, it writes a no-change verdict.
 
 ## Backend Commands
 
@@ -233,6 +255,8 @@ Current commands cover the chat-first loop and manual evidence loop:
 
 - `create_workspace`
 - `open_workspace`
+- `create_project`
+- `list_projects`
 - `list_workspace_files`
 - `read_file`
 - `write_file`
@@ -249,6 +273,7 @@ Current commands cover the chat-first loop and manual evidence loop:
 Backend behavior implemented:
 
 - append run records to `.designforge/runs.jsonl`
+- keep chat in `.designforge/chat.jsonl` and tool/status work activity in `.designforge/activity.jsonl`
 - append chat feedback records to `.designforge/comments.jsonl`
 - index generated comment anchors to `.designforge/anchors.json`
 - verify generated workspace with TypeScript and Vite build on request
@@ -259,9 +284,9 @@ Backend behavior implemented:
 - export handoff zip with native Rust zip packaging
 - create handoff bundle
 - start Codex with `danger-full-access` on Windows and force PowerShell 7 through `windows.shell_path` when available, while keeping `workspace-write` as the default on other platforms
-- reset chat, run history, design manifests, `DESIGN.md`, generated screen, and generated styles when the user starts a new design system
+- create new project directories instead of clearing existing project history when the user starts a new design
 - pass Codex only a short file-read instruction while storing the full prompt in `.designforge/codex-prompts/latest.md` to avoid Windows command-line length failures
-- skip heavy workspace directories such as `.git`, `node_modules`, `target`, and `dist` during file indexing
+- skip heavy workspace directories such as `.git`, `node_modules`, `target`, `dist`, and nested DesignForge project directories during file indexing
 - run long Codex, verification, screenshot, console, and export work through blocking worker tasks instead of holding the Tauri command thread
 
 Do not add a generic shell runner.
@@ -286,6 +311,7 @@ Visible:
 Internal:
 
 - workspace manager
+- project manager
 - prompt compiler
 - design-system health gate
 - AI preflight clarification writer
@@ -400,6 +426,25 @@ Status: implemented for MVP as a manual action.
 - Export screenshot, console, critique, clarification, brief, context, and quality audit files when present.
 - Generate handoff README with request, artifact, design-system evidence, verification, preview, screenshot, console, critique, quality audit, assets, and files.
 - Later add standalone HTML, PDF, and PPTX support.
+
+### Phase 8 - Project Isolation
+
+Status: implemented.
+
+- Replace the destructive new-design reset UI with `새 프로젝트 만들기`.
+- Create new projects under the internal `designforge-workspace` root.
+- Add a folder-button side panel that lists prior projects and switches by opening that directory.
+- Keep each project's chat, activity log, run history, design system, generated artifact, prompts, preview evidence, and exports under that project directory.
+- Split work activity from conversation messages so chat and task records do not mix.
+- Preserve legacy root workspaces as selectable projects while skipping nested project folders during file indexing.
+
+### Phase 9 - Claude Design Quality Lenses
+
+Status: implemented.
+
+- Re-read `claude-design.md` by workflow, output discipline, questions, anchors, content, frontend design, interaction/prototype, design-system creation, verification/handoff, and source/copyright lenses.
+- Encode the resulting 10 quality lenses in prompt compilation, preflight questions, `DESIGN.md` seed generation, design-system health inspection, starter workspace instructions, and manual quality audit.
+- Require broad design changes to record concrete decisions in `DESIGN.md` before coding.
 
 ## Verification Snapshot
 

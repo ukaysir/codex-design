@@ -7,9 +7,11 @@ import {
   History,
   Loader2,
   Maximize2,
+  MessageCircle,
   Minimize2,
   MousePointer2,
   Play,
+  Plus,
   Send,
   Square,
   Terminal,
@@ -44,6 +46,7 @@ import type {
   LogLevel,
   PreviewInfo,
   PreviewManifest,
+  ProjectInfo,
   QualityAuditManifest,
   RunRecord,
   ScreenshotInfo,
@@ -54,6 +57,7 @@ import type {
 
 const DEFAULT_SETTINGS: Settings = {
   defaultWorkspaceDir: "",
+  defaultProjectRootDir: "",
   codexPath: "codex",
   packageManager: "npm",
   lastWorkspacePath: "",
@@ -61,8 +65,11 @@ const DEFAULT_SETTINGS: Settings = {
 
 const ARTIFACT_PATH = "src/generated/Screen.tsx";
 const DEFAULT_WORKSPACE = "designforge-workspace";
+const DEFAULT_PROJECT_ROOT = DEFAULT_WORKSPACE;
 const RUNS_PATH = ".designforge/runs.jsonl";
 const CHAT_PATH = ".designforge/chat.jsonl";
+const ACTIVITY_PATH = ".designforge/activity.jsonl";
+const PROJECT_MANIFEST_PATH = ".designforge/project.json";
 const CODEX_SESSION_PATH = ".designforge/codex-session.json";
 const BRIEF_PATH = ".designforge/brief.json";
 const CONTEXT_PATH = ".designforge/context.json";
@@ -98,7 +105,6 @@ type ChatMessage = {
 };
 
 type StepStatus = "idle" | "active" | "done" | "error";
-type NavKey = "workbench" | "design" | "history" | "verify";
 type ChatPanelTab = "conversation" | "history";
 
 type PipelineStep = {
@@ -141,13 +147,6 @@ type CodexSessionManifest = {
   lastLabel?: string;
   lastUsedResume?: boolean;
 };
-
-const NAV_ITEMS: Array<{ key: NavKey; label: string; anchor: string }> = [
-  { key: "workbench", label: "작업대", anchor: "preview" },
-  { key: "design", label: "디자인 시스템", anchor: "feature-list" },
-  { key: "history", label: "작업 기록", anchor: "agent-chat" },
-  { key: "verify", label: "검증 로그", anchor: "verification" },
-];
 
 const START_STEPS: PipelineStep[] = [
   { id: "context", label: "Context", detail: "Create or open the workspace", status: "idle" },
@@ -215,11 +214,11 @@ function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
-        variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] hover:bg-[var(--primary-strong)]",
+        "inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+        variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_8px_18px_rgba(49,130,246,0.18)] hover:bg-[var(--primary-strong)]",
         variant === "secondary" &&
-          "border border-[var(--line-strong)] bg-white text-[var(--ink)] hover:bg-[var(--panel-2)]",
-        variant === "ghost" && "border border-transparent text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--ink)]",
+          "border border-[var(--line-strong)] bg-white text-[var(--ink)] hover:border-[var(--accent)] hover:bg-white hover:text-[var(--accent)]",
+        variant === "ghost" && "border border-transparent text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--accent)]",
         className,
       )}
     >
@@ -236,8 +235,8 @@ function Badge({
   tone?: "lime" | "cyan" | "amber" | "danger" | "steel";
 }) {
   const styles = {
-    lime: "border-[var(--line-strong)] bg-white text-[var(--ink)]",
-    cyan: "border-black bg-black text-white",
+    lime: "border-blue-100 bg-blue-50 text-[var(--primary-strong)]",
+    cyan: "border-[var(--primary)] bg-[var(--primary)] text-white",
     amber: "border-amber-200 bg-amber-50 text-amber-800",
     danger: "border-red-200 bg-red-50 text-red-700",
     steel: "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]",
@@ -246,7 +245,7 @@ function Badge({
   return (
     <span
       className={cn(
-        "inline-flex min-h-7 shrink-0 items-center whitespace-nowrap rounded-full border px-3 text-[11px] font-medium",
+        "inline-flex min-h-7 shrink-0 items-center whitespace-nowrap rounded-full border px-3 text-[11px] font-semibold",
         styles[tone],
       )}
     >
@@ -296,6 +295,41 @@ function sameWorkspaceFiles(left: WorkspaceFile[], right: WorkspaceFile[]) {
   );
 }
 
+function isActivityMessage(message: ChatMessage) {
+  return message.kind === "status" || message.kind === "tool";
+}
+
+function parseChatMessageRecords(raw: string) {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Partial<ChatMessage>)
+    .filter(
+      (message): message is ChatMessage =>
+        typeof message.id === "string" &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.content === "string" &&
+        typeof message.createdAt === "string",
+    );
+}
+
+function dedupeMessages(messages: ChatMessage[]) {
+  const seen = new Set<string>();
+  return messages.filter((message) => {
+    if (seen.has(message.id)) return false;
+    seen.add(message.id);
+    return true;
+  });
+}
+
+function formatProjectTime(value: string) {
+  const seconds = Number(value);
+  const date = Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "기록 없음";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function previewFrameSrc(url: string, selectionMode: boolean) {
   if (!selectionMode) return url;
   return `${url}${url.includes("?") ? "&" : "?"}designforgeSelect=1`;
@@ -332,6 +366,11 @@ const DESIGN_HEALTH_SECTIONS = [
   "Differentiation",
   "Visual Foundations",
   "Quality Bar",
+  "Design Quality Lenses",
+  "Interaction and State Model",
+  "Responsive Rules",
+  "Asset and Source Policy",
+  "Editability and Anchors",
   "Component Inventory",
   "Revision Rules",
   "Content Rules",
@@ -425,10 +464,14 @@ function inferPurposeAssumption(request: string) {
 
 function qualityBarForMode(mode: GenerationMode) {
   const base = [
+    "The request is translated into explicit artifact type, audience, fidelity, constraints, and success criteria.",
+    "Provided assets, code, design systems, screenshots, and prior chat are treated as source truth before invention.",
     "Primary hierarchy is legible within five seconds.",
     "The aesthetic direction is specific, not a generic AI SaaS default.",
     "Every section earns its place; no filler copy or fake metrics.",
     "Typography, color, spacing, and components behave like a system.",
+    "Expected interaction states and responsive behavior are defined when the surface implies a real product.",
+    "Assets are real or clearly marked assumptions; no invented logos, icons, or copyrighted recreation.",
     "Text fits, controls are accessible, and anchors are stable.",
   ];
   if (mode === "variations") return [...base, "Three directions must be meaningfully different and comparable in one artifact."];
@@ -544,10 +587,10 @@ ${questions}
 export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [workspacePath, setWorkspacePath] = useState(settings.lastWorkspacePath);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [activeNav, setActiveNav] = useState<NavKey>("workbench");
   const [chatPanelTab, setChatPanelTab] = useState<ChatPanelTab>("conversation");
   const [generationMode, setGenerationMode] = useState<GenerationMode>("guided");
   const [guidedDraft, setGuidedDraft] = useState<GuidedDraft | null>(null);
@@ -557,7 +600,10 @@ export default function App() {
     { id: "boot", level: "info", timestamp: now(), message: "Chat-first DesignForge ready." },
   ]);
   const [showAllLogs, setShowAllLogs] = useState(false);
+  const [showProjectPanel, setShowProjectPanel] = useState(false);
+  const [showPipelinePanel, setShowPipelinePanel] = useState(false);
   const [runHistory, setRunHistory] = useState<RunRecord[]>([]);
+  const [activityMessages, setActivityMessages] = useState<ChatMessage[]>([]);
   const [preview, setPreview] = useState<PreviewInfo | null>(null);
   const [codexSession, setCodexSession] = useState<CodexSessionManifest | null>(null);
   const [anchorManifest, setAnchorManifest] = useState<AnchorManifest | null>(null);
@@ -575,6 +621,7 @@ export default function App() {
   const [latestBrief, setLatestBrief] = useState<DesignBriefManifest | null>(null);
   const [latestContext, setLatestContext] = useState<DesignContextManifest | null>(null);
   const [latestClarification, setLatestClarification] = useState<DesignClarificationManifest | null>(null);
+  const projectRootPath = settings.defaultProjectRootDir || DEFAULT_PROJECT_ROOT;
 
   const visibleFiles = useMemo(
     () =>
@@ -584,7 +631,9 @@ export default function App() {
           [
             "DESIGN.md",
             "AGENTS.md",
+            PROJECT_MANIFEST_PATH,
             CHAT_PATH,
+            ACTIVITY_PATH,
             CODEX_SESSION_PATH,
             CLARIFICATION_PATH,
             BRIEF_PATH,
@@ -666,6 +715,7 @@ export default function App() {
         await loadCodexSession(workspacePath);
         await loadAnchorManifest(workspacePath);
         await loadChatHistory(workspacePath);
+        await loadActivityHistory(workspacePath);
         await loadDesignClarification(workspacePath);
         await loadDesignBrief(workspacePath);
         await loadDesignContext(workspacePath);
@@ -675,6 +725,10 @@ export default function App() {
       }
     })();
   }, [workspacePath]);
+
+  useEffect(() => {
+    void refreshProjects();
+  }, [projectRootPath, workspacePath]);
 
   function patchSettings(patch: Partial<Settings>) {
     setSettings((current) => {
@@ -689,16 +743,6 @@ export default function App() {
       ...current.slice(-(MAX_LOGS - 1)),
       { id: crypto.randomUUID(), level, timestamp: now(), message: trimLog(message) },
     ]);
-  }
-
-  function activateNav(item: (typeof NAV_ITEMS)[number]) {
-    setActiveNav(item.key);
-    if (item.key === "history") setChatPanelTab("history");
-    if (item.key === "workbench") setChatPanelTab("conversation");
-    window.setTimeout(() => {
-      const target = document.querySelector<HTMLElement>(`[data-comment-anchor="${item.anchor}"]`);
-      target?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
-    });
   }
 
   function createChatMessage(
@@ -719,7 +763,11 @@ export default function App() {
 
   function pushMessage(role: ChatMessage["role"], content: string, kind: ChatKind = "chat", level?: LogLevel) {
     const message = createChatMessage(role, content, kind, level);
-    setMessages((current) => [...current, message]);
+    if (isActivityMessage(message)) {
+      setActivityMessages((current) => [...current, message].slice(-120));
+    } else {
+      setMessages((current) => [...current, message]);
+    }
     return message;
   }
 
@@ -735,21 +783,28 @@ export default function App() {
     kind: ChatKind = "chat",
     level?: LogLevel,
   ) {
-    const message = pushMessage(role, content, kind, level);
+    const message = createChatMessage(role, content, kind, level);
+    const isActivity = isActivityMessage(message);
+    const relativePath = isActivity ? ACTIVITY_PATH : CHAT_PATH;
+    if (isActivity) {
+      setActivityMessages((current) => [...current, message].slice(-120));
+    } else {
+      setMessages((current) => [...current, message]);
+    }
     try {
       let raw = "";
       try {
-        raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CHAT_PATH });
+        raw = await callTauri<string>("read_file", { workspacePath: path, relativePath });
       } catch {
         raw = "";
       }
       await callTauri("write_file", {
         workspacePath: path,
-        relativePath: CHAT_PATH,
+        relativePath,
         content: `${raw.trimEnd()}\n${JSON.stringify(message)}\n`.trimStart(),
       });
     } catch (error) {
-      pushLog("error", `Could not persist chat message: ${textFromError(error)}`);
+      pushLog("error", `Could not persist ${isActivity ? "activity" : "chat"} message: ${textFromError(error)}`);
     }
     return message;
   }
@@ -757,21 +812,34 @@ export default function App() {
   async function loadChatHistory(path: string) {
     try {
       const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CHAT_PATH });
-      const records = raw
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as Partial<ChatMessage>)
-        .filter(
-          (message): message is ChatMessage =>
-            typeof message.id === "string" &&
-            (message.role === "user" || message.role === "assistant") &&
-            typeof message.content === "string" &&
-            typeof message.createdAt === "string",
-        );
+      const records = parseChatMessageRecords(raw).filter((message) => !isActivityMessage(message));
       setMessages(records.length ? records.slice(-80) : createIntroMessages());
     } catch {
       setMessages(createIntroMessages());
+    }
+  }
+
+  async function loadActivityHistory(path: string) {
+    try {
+      let raw = "";
+      try {
+        raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: ACTIVITY_PATH });
+      } catch {
+        raw = "";
+      }
+      let legacyRaw = "";
+      try {
+        legacyRaw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CHAT_PATH });
+      } catch {
+        legacyRaw = "";
+      }
+      const records = dedupeMessages([
+        ...parseChatMessageRecords(legacyRaw).filter(isActivityMessage),
+        ...parseChatMessageRecords(raw).filter(isActivityMessage),
+      ]);
+      setActivityMessages(records.slice(-120));
+    } catch {
+      setActivityMessages([]);
     }
   }
 
@@ -831,8 +899,103 @@ export default function App() {
     return { status, updatedAt: new Date().toISOString(), ...patch };
   }
 
-  async function ensureWorkspace() {
-    const target = workspacePath || settings.lastWorkspacePath || settings.defaultWorkspaceDir || DEFAULT_WORKSPACE;
+  async function refreshProjects() {
+    try {
+      const nextProjects = await callTauri<ProjectInfo[]>("list_projects", { projectRootPath });
+      setProjects(nextProjects);
+    } catch (error) {
+      pushLog("error", `Could not load projects: ${textFromError(error)}`);
+    }
+  }
+
+  function resetWorkspaceScopedState() {
+    setFiles([]);
+    setCodexSession(null);
+    setPreview(null);
+    setSelectionMode(false);
+    setArtifactOnlyMode(false);
+    setAnchorManifest(null);
+    setRunHistory([]);
+    setActivityMessages([]);
+    setSelectedAnchorId("");
+    setPreviewSelection(null);
+    setComponentEdit("");
+    setGuidedDraft(null);
+    setInput("");
+    setGenerationMode("guided");
+    setChatPanelTab("conversation");
+    setMessages(createIntroMessages());
+    setLatestClarification(null);
+    setLatestBrief(null);
+    setLatestContext(null);
+    setManualVerifyResult(null);
+    setManualConsoleInfo(null);
+    setManualScreenshotInfo(null);
+    setManualCritique(null);
+    setManualQualityAudit(null);
+    setManualExportPath("");
+    setSteps(START_STEPS);
+  }
+
+  async function stopPreviewBeforeProjectChange() {
+    try {
+      await callTauri("stop_preview");
+    } catch {
+      // Project switching should not fail just because no preview is running.
+    }
+  }
+
+  async function switchProject(path: string) {
+    if (busy || path === workspacePath) {
+      setShowProjectPanel(false);
+      return;
+    }
+    await stopPreviewBeforeProjectChange();
+    resetWorkspaceScopedState();
+    try {
+      const info = await callTauri<WorkspaceInfo>("open_workspace", { path });
+      setWorkspacePath(info.path);
+      patchSettings({ lastWorkspacePath: info.path });
+      setShowProjectPanel(false);
+      pushLog("success", `Switched project: ${info.path}`);
+      await refreshProjects();
+    } catch (error) {
+      pushLog("error", `Could not open project: ${textFromError(error)}`);
+    }
+  }
+
+  async function createNewProject(name?: string, manageBusy = true) {
+    if (manageBusy && busy) return "";
+    if (manageBusy) setBusy(true);
+    await stopPreviewBeforeProjectChange();
+    resetWorkspaceScopedState();
+    try {
+      const project = await callTauri<ProjectInfo>("create_project", {
+        projectRootPath,
+        name: name?.trim() || "Untitled DesignForge Project",
+      });
+      setWorkspacePath(project.path);
+      patchSettings({ lastWorkspacePath: project.path });
+      setProjects((current) => [project, ...current.filter((item) => item.path !== project.path)]);
+      setShowProjectPanel(false);
+      pushLog("success", `Created project: ${project.path}`);
+      await refreshProjects();
+      return project.path;
+    } catch (error) {
+      pushLog("error", `Could not create project: ${textFromError(error)}`);
+      return "";
+    } finally {
+      if (manageBusy) setBusy(false);
+    }
+  }
+
+  async function ensureWorkspace(projectName?: string) {
+    const target = workspacePath || settings.lastWorkspacePath || settings.defaultWorkspaceDir;
+    if (!target) {
+      const created = await createNewProject(projectName, false);
+      if (!created) throw new Error("Could not create a project workspace.");
+      return created;
+    }
     try {
       const info = await callTauri<WorkspaceInfo>("open_workspace", { path: target });
       setWorkspacePath(info.path);
@@ -906,57 +1069,6 @@ export default function App() {
     setCodexSession(manifest);
     pushLog("success", `${result.usedResume ? "Resumed" : "Stored"} Codex session: ${result.sessionId.slice(0, 8)}...`);
     return manifest;
-  }
-
-  async function resetCodexSession(path = workspacePath) {
-    const target = path || (await ensureWorkspace());
-    const manifest = {
-      sessionId: "",
-      updatedAt: new Date().toISOString(),
-      resetAt: new Date().toISOString(),
-    };
-    try {
-      await callTauri("stop_preview");
-    } catch {
-      // Preview may not be running; reset should still continue.
-    }
-    await callTauri("reset_workspace_design_state", { workspacePath: target });
-    await callTauri("write_file", {
-      workspacePath: target,
-      relativePath: CODEX_SESSION_PATH,
-      content: JSON.stringify(manifest, null, 2),
-    });
-    setCodexSession(null);
-    setPreview(null);
-    setSelectionMode(false);
-    setArtifactOnlyMode(false);
-    setAnchorManifest(null);
-    setRunHistory([]);
-    setSelectedAnchorId("");
-    setPreviewSelection(null);
-    setComponentEdit("");
-    setGuidedDraft(null);
-    setInput("");
-    setGenerationMode("guided");
-    setChatPanelTab("conversation");
-    setMessages(createIntroMessages());
-    setLatestClarification(null);
-    setLatestBrief(null);
-    setLatestContext(null);
-    setManualVerifyResult(null);
-    setManualConsoleInfo(null);
-    setManualScreenshotInfo(null);
-    setManualCritique(null);
-    setManualQualityAudit(null);
-    setManualExportPath("");
-    setSteps(START_STEPS);
-    await callTauri("write_file", {
-      workspacePath: target,
-      relativePath: CHAT_PATH,
-      content: "",
-    });
-    pushLog("info", "Started a fresh design system, cleared prior runs, and reset the Codex session.");
-    await refreshFiles(target);
   }
 
   async function loadAnchorManifest(path: string) {
@@ -1074,6 +1186,16 @@ export default function App() {
         "- Color: background, surface, text, accent, border, semantic states, and contrast notes.\n- Typography: display/body/mono choices, scale, weights, line-height, and why they fit.\n- Layout: grid, density, spacing rhythm, responsive behavior, and composition rules.\n- Components: buttons, inputs, cards, navigation, feedback, empty states, and repeated patterns.\n- Motion: what moves, why it moves, duration/easing, and reduced-motion behavior.\n- Assets: real assets used or needed; do not invent logos or decorative replacements.",
       "Quality Bar":
         "- Strong hierarchy: the primary message and action are obvious within five seconds.\n- Specific aesthetic direction: the design should not read like a generic AI SaaS template.\n- Useful content only: every section earns its place.\n- System continuity: repeated controls, cards, spacing, type, and tone follow the same vocabulary.\n- Implementation fidelity: responsive constraints, readable text, visible focus, and accessible controls.",
+      "Design Quality Lenses":
+        "1. Request fit: artifact type, fidelity, audience, constraints, and option count.\n2. Source truth: assets, code, design systems, screenshots, and prior chat.\n3. System first: purpose, tone, differentiation, tokens, components, motion, and content rules.\n4. Content economy: no filler, fake metrics, or unrequested material.\n5. Visual distinctiveness: memorable direction, not generic AI defaults.\n6. Composition and scale: hierarchy, density, viewport, responsiveness, and type scale.\n7. Interaction realism: hover, focus, active, loading, empty, error, validation, and navigation states.\n8. Editability and anchors: literal copy, stable data-comment-anchor values, and narrow targeted edits.\n9. Asset integrity: real assets only, no invented logos/icons, no copyrighted recreation.\n10. Verification and handoff: previewability, assumptions, caveats, and implementation details.",
+      "Interaction and State Model":
+        "- Define hover, active, focus, loading, empty, error, success, and disabled states when the surface implies product interaction.\n- Prototype enough behavior to make the generated result feel real without making the code difficult to revise.\n- Use motion for comprehension, rhythm, or state change and respect reduced-motion preferences.",
+      "Responsive Rules":
+        "- Name the primary viewport and fixed-canvas requirements before coding.\n- Ensure text, controls, and repeated items fit at desktop and narrower widths.\n- Use stable flex/grid constraints, explicit gaps, and intentional density.",
+      "Asset and Source Policy":
+        "- Use provided assets, code, or design-system evidence as source of truth.\n- Do not invent logos, fake icons, fake metrics, or copyrighted UI details.\n- If assets are missing, record assumptions and use neutral placeholders.",
+      "Editability and Anchors":
+        "- Keep user-visible copy literal and directly editable where practical.\n- Preserve existing data-comment-anchor values and add stable anchors for major semantic regions.\n- For targeted edits, change only the requested region and preserve unrelated layout, spacing, type, colors, and copy.",
       "Component Inventory":
         "Track stable semantic regions and keep them aligned with data-comment-anchor values in src/generated/Screen.tsx.",
       "Revision Rules":
@@ -1719,6 +1841,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     const path = workspacePath || (await ensureWorkspace());
     await ensurePreviewSelectionBridge(path);
     await loadChatHistory(path);
+    await loadActivityHistory(path);
     return path;
   }
 
@@ -2064,11 +2187,12 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     setChatPanelTab("conversation");
     setBusy(true);
     try {
-      const path = await ensureWorkspace();
+      const path = await ensureWorkspace(request);
       await ensurePreviewSelectionBridge(path);
       await refreshFiles(path);
       await loadRunHistory(path);
       await loadChatHistory(path);
+      await loadActivityHistory(path);
       await loadAnchorManifest(path);
       await appendChatMessage(path, "user", request);
       await appendChatMessage(path, "assistant", "요청과 현재 디자인 시스템을 먼저 분석한 뒤 필요한 질문을 만들겠습니다.", "status", "info");
@@ -2245,13 +2369,14 @@ ${request}`;
 
     try {
       setStep("context", "active");
-      path = await ensureWorkspace();
+      path = await ensureWorkspace(recordRequest);
       await ensurePreviewSelectionBridge(path);
       await refreshFiles(path);
       await loadRunHistory(path);
       await loadCodexSession(path);
       await loadAnchorManifest(path);
       await loadChatHistory(path);
+      await loadActivityHistory(path);
       if (clarification) setLatestClarification(clarification);
       else await loadDesignClarification(path);
       await loadQualityAudit(path);
@@ -2423,14 +2548,12 @@ ${request}`;
   const designHealth = latestBrief?.designSystemHealth;
   const visibleLogs = showAllLogs ? logs : logs.slice(-8);
   const conversationMessages = useMemo(
-    () => messages.filter((message) => message.kind !== "status" && message.kind !== "tool"),
-    [messages],
-  );
-  const activityMessages = useMemo(
-    () => messages.filter((message) => message.kind === "status" || message.kind === "tool"),
+    () => messages.filter((message) => !isActivityMessage(message)),
     [messages],
   );
   const historyCount = activityMessages.length + runHistory.length;
+  const activeProject = projects.find((project) => project.path === workspacePath);
+  const activeProjectName = activeProject?.name || (workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : "프로젝트 없음");
   const verificationRows: Array<{ name: string; value: string; tone: "lime" | "cyan" | "amber" | "danger" | "steel" }> = [
     {
       name: "TypeScript/Vite",
@@ -2486,20 +2609,20 @@ ${request}`;
     return (
       <div
         data-screen-label="designforge-artifact-only-preview"
-        className="flex h-screen min-w-0 flex-col overflow-hidden bg-[#0b0b0b] text-white"
+        className="flex h-screen min-w-0 flex-col overflow-hidden bg-[var(--panel-2)] text-[var(--ink)]"
       >
-        <header className="flex min-h-14 items-center justify-between gap-4 border-b border-[#252525] bg-[#111111] px-4">
+        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[var(--line)] bg-white px-5">
           <div className="min-w-0">
-            <p className="font-mono text-[11px] uppercase tracking-normal text-white/45">artifact only preview</p>
-            <h1 className="truncate text-base font-semibold">작업물 미리보기</h1>
+            <p className="text-sm font-semibold text-[var(--primary)]">artifact only preview</p>
+            <h1 className="truncate text-xl font-bold text-[var(--ink-strong)]">작업물 미리보기</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded-full border border-[#2f2f2f] bg-[#171717] px-3 py-2 font-mono text-xs text-white/70">
+            <span className="rounded-full border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
               {ARTIFACT_VIEWPORT_WIDTH} x {ARTIFACT_VIEWPORT_HEIGHT}
             </span>
             <Button
               variant="ghost"
-              className="min-h-9 border-[#2f2f2f] bg-[#171717] px-3 text-xs text-white hover:bg-[#232323]"
+              className="min-h-9 px-3 text-xs"
               onClick={() => void startPreviewSafely()}
               disabled={busy || !workspacePath}
             >
@@ -2508,7 +2631,7 @@ ${request}`;
             </Button>
             <Button
               variant="ghost"
-              className="min-h-9 border-[#2f2f2f] bg-[#171717] px-3 text-xs text-white hover:bg-[#232323]"
+              className="min-h-9 px-3 text-xs"
               onClick={() => setSelectionMode((current) => !current)}
               disabled={!preview}
             >
@@ -2517,7 +2640,7 @@ ${request}`;
             </Button>
             <Button
               variant="ghost"
-              className="min-h-9 border-[#2f2f2f] bg-white px-3 text-xs text-black hover:bg-white/90"
+              className="min-h-9 border-[var(--line)] bg-white px-3 text-xs text-[var(--ink)] hover:text-[var(--primary)]"
               onClick={() => setArtifactOnlyMode(false)}
               title="Esc 키로도 돌아갈 수 있습니다."
             >
@@ -2529,7 +2652,7 @@ ${request}`;
 
         <section className="min-h-0 flex-1 overflow-auto p-6">
           <div className="mx-auto w-max">
-            <div className="mb-3 flex items-center justify-between gap-4 text-xs text-white/55">
+            <div className="mb-3 flex items-center justify-between gap-4 text-xs text-[var(--muted)]">
               <span className="truncate font-mono">{ARTIFACT_PATH}</span>
               <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비 필요"} · Ctrl+Shift+P 토글 · Esc 닫기</span>
             </div>
@@ -2571,118 +2694,77 @@ ${request}`;
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="grid h-screen min-w-[1280px] grid-cols-[minmax(680px,0.95fr)_minmax(300px,1fr)_300px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+      className="relative grid h-screen min-w-[1180px] grid-cols-[320px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
     >
       <aside
         data-comment-anchor="navigation"
-        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--panel)] px-6 py-5"
+        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[#fbfaf7] px-4 py-3"
       >
-        <header className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--line-strong)] bg-white">
-              <span className="font-mono text-sm font-medium text-[var(--ink)]">DF</span>
-            </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-lg font-medium tracking-normal text-[var(--ink-strong)]">DesignForge</h1>
-              <p className="mt-1 truncate font-mono text-xs text-[var(--muted)]" title={workspacePath || DEFAULT_WORKSPACE}>
-                {truncatePath(workspacePath || DEFAULT_WORKSPACE)}
-              </p>
-            </div>
+        <header className="flex min-h-10 items-center justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary)] text-white shadow-[0_8px_18px_rgba(49,130,246,0.18)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
+              onClick={() => setShowProjectPanel(true)}
+              title="프로젝트 목록"
+              aria-label="프로젝트 목록"
+            >
+              <FolderOpen size={17} />
+            </button>
+            <Button
+              variant="secondary"
+              className="min-h-8 shrink-0 px-3 text-xs"
+              onClick={() => void createNewProject()}
+              disabled={busy}
+              title="새 프로젝트 만들기"
+            >
+              <Plus size={14} />
+              새 프로젝트
+            </Button>
           </div>
-          <Badge tone={codexSession ? "lime" : "cyan"}>{codexSession ? `session ${codexSessionLabel}` : "Codex ready"}</Badge>
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-[var(--muted)] transition hover:bg-white hover:text-[var(--ink)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
+            onClick={() => setChatPanelTab((current) => (current === "conversation" ? "history" : "conversation"))}
+            title={chatPanelTab === "conversation" ? "작업 기록 보기" : "대화로 돌아가기"}
+            aria-label={chatPanelTab === "conversation" ? "작업 기록 보기" : "대화로 돌아가기"}
+          >
+            {chatPanelTab === "conversation" ? <History size={17} /> : <MessageCircle size={17} />}
+          </button>
         </header>
 
-        <nav className="mt-5 grid grid-cols-4 gap-2 text-sm text-[var(--charcoal)]" aria-label="작업 보기">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => activateNav(item)}
-              aria-current={activeNav === item.key ? "page" : undefined}
-              className={cn(
-                "flex min-h-10 items-center justify-center gap-2 rounded-full px-3 text-center transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
-                activeNav === item.key
-                  ? "border border-[var(--line)] bg-[var(--panel-2)] text-[var(--ink-strong)]"
-                  : "hover:bg-[var(--panel-2)]",
-              )}
-            >
-              <span>{item.label}</span>
-              {activeNav === item.key ? <span className="h-1.5 w-1.5 rounded-full bg-black" /> : null}
-            </button>
-          ))}
-        </nav>
-
-        <div className="mt-4 flex items-center gap-2">
-          <Button
-            variant="secondary"
-            className="min-h-9 flex-1 px-3 text-xs"
-            onClick={() => void resetCodexSession()}
-            disabled={busy}
-            title="현재 채팅, 디자인 시스템, 생성 화면을 초기화하고 새 Codex 세션으로 시작합니다."
-          >
-            새 디자인 시작
-          </Button>
-          <Badge tone="steel">{codexSession ? "resume on" : "fresh next"}</Badge>
-        </div>
-
-        <section data-comment-anchor="agent-chat" className="mt-5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
-          <div className="border-b border-[var(--line)] px-5 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design conversation</p>
-                <h2 className="mt-1 text-2xl font-semibold text-[var(--ink-strong)]">디자인 대화</h2>
-              </div>
-              <Badge tone={guidedDraft ? "cyan" : "steel"}>
-                {chatPanelTab === "conversation"
-                  ? guidedDraft
-                    ? "답변 대기"
-                    : `${conversationMessages.length}개`
-                  : `${historyCount}개`}
-              </Badge>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-2 rounded-full bg-[var(--panel-2)] p-1">
-              {[
-                { tab: "conversation" as ChatPanelTab, label: "현재 대화", count: conversationMessages.length },
-                { tab: "history" as ChatPanelTab, label: "작업 기록", count: historyCount },
-              ].map(({ tab, label, count }) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setChatPanelTab(tab)}
-                  className={cn(
-                    "flex min-h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
-                    chatPanelTab === tab ? "bg-white text-[var(--ink-strong)] shadow-sm" : "text-[var(--charcoal)] hover:bg-white/70",
-                  )}
-                >
-                  <span>{label}</span>
-                  <span className="font-mono text-xs text-[var(--muted)]">{count}</span>
-                </button>
-              ))}
-            </div>
+        <section className="mt-3 rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs leading-5 text-[var(--muted)]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-[var(--ink)]">현재 프로젝트</span>
+            <Badge tone={workspacePath ? "lime" : "steel"}>{workspacePath ? "연결됨" : "대기"}</Badge>
           </div>
+          <p className="mt-1 truncate font-semibold text-[var(--ink-strong)]">{activeProjectName}</p>
+          <p className="truncate font-mono">{workspacePath || projectRootPath}</p>
+        </section>
 
+        <section data-comment-anchor="agent-chat" className="mt-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {chatPanelTab === "conversation" ? (
             <>
-              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--panel-2)] px-5 py-5">
-                <div className="grid gap-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-0 py-2">
+                <div className="grid gap-3">
                   {conversationMessages.slice(-60).map((message) => (
                     <ChatRow key={message.id} message={message} />
                   ))}
                 </div>
               </div>
 
-              <div data-comment-anchor="hero" className="border-t border-[var(--line)] bg-white p-4">
+              <div data-comment-anchor="hero" className="rounded-2xl border border-[var(--line)] bg-white p-3 shadow-[0_8px_24px_rgba(31,41,55,0.06)]">
                 {guidedDraft ? (
-                  <div className="mb-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-3 text-sm leading-6 text-[var(--charcoal)]">
+                  <div className="mb-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--charcoal)]">
                     <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
                     <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
                   </div>
                 ) : null}
 
-                <label className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--line)] bg-white px-4 text-sm font-medium text-[var(--charcoal)]">
+                <label className="mb-2 inline-flex min-h-8 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-medium text-[var(--charcoal)]">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 accent-black"
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
                     checked={generationMode === "variations"}
                     onChange={(event) => selectGenerationMode(event.target.checked ? "variations" : "guided")}
                     disabled={busy || Boolean(guidedDraft)}
@@ -2700,7 +2782,7 @@ ${request}`;
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
                   }}
-                  className="min-h-36 w-full resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--panel-2)] p-5 text-base leading-8 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+                  className="min-h-28 w-full resize-none rounded-2xl border border-[var(--line-strong)] bg-white p-4 text-sm leading-7 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] shadow-[0_8px_24px_rgba(31,41,55,0.05)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
                   placeholder={
                     guidedDraft
                       ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
@@ -2711,7 +2793,7 @@ ${request}`;
                 <div data-comment-anchor="primary-action" className="mt-3 flex justify-end gap-2">
                   <Button
                     variant="secondary"
-                    className="min-h-9 px-4 text-xs"
+                    className="min-h-8 px-4 text-xs"
                     onClick={() => {
                       setInput("");
                       setGuidedDraft(null);
@@ -2721,7 +2803,7 @@ ${request}`;
                   >
                     비우기
                   </Button>
-                  <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-9 px-5 text-xs">
+                  <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-8 px-5 text-xs">
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                     {guidedDraft ? "답변 보내기" : "보내기"}
                   </Button>
@@ -2729,8 +2811,8 @@ ${request}`;
               </div>
             </>
           ) : (
-            <div data-comment-anchor="run-history" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--panel-2)] px-5 py-5">
-              <div className="grid gap-5">
+            <div data-comment-anchor="run-history" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-0 py-2">
+              <div className="grid gap-3">
                 <section className="rounded-2xl border border-[var(--line)] bg-white p-4">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
@@ -2799,32 +2881,48 @@ ${request}`;
 
       </aside>
 
-      <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-[var(--canvas)]">
-        <div className="flex min-h-16 items-center justify-between border-b border-[var(--line)] px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div>
-              <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">live artifact canvas</p>
-              <h2 className="truncate text-2xl font-medium tracking-normal text-[var(--ink-strong)]">생성 화면 미리보기</h2>
+      <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-white">
+        <div className="flex min-h-28 flex-col justify-center gap-3 border-b border-[var(--line)] px-6 py-4">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--primary)]">실시간 프리뷰</p>
+              <h2 className="truncate text-3xl font-bold tracking-normal text-[var(--ink-strong)]">생성 화면 미리보기</h2>
             </div>
-            <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
+              <Button
+                variant={showPipelinePanel ? "primary" : "secondary"}
+                className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
+                onClick={() => setShowPipelinePanel((current) => !current)}
+                title="작업 파이프라인과 검증 패널을 엽니다."
+              >
+                <Terminal size={14} />
+                파이프라인
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Button
               variant="ghost"
-              className="min-h-9 px-3 text-xs"
+              className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
               onClick={() => void startPreviewSafely()}
               disabled={busy || !workspacePath}
             >
               <Play size={14} />
               시작
             </Button>
-            <Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => void stopPreviewSafely()} disabled={!preview}>
+            <Button
+              variant="ghost"
+              className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
+              onClick={() => void stopPreviewSafely()}
+              disabled={!preview}
+            >
               <Square size={14} />
               중지
             </Button>
             <Button
               variant={selectionMode ? "primary" : "ghost"}
-              className="min-h-9 px-3 text-xs"
+              className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
               onClick={() => setSelectionMode((current) => !current)}
               disabled={!preview}
               title="미리보기에서 data-comment-anchor 영역을 클릭해 수정 대상을 선택합니다."
@@ -2834,22 +2932,22 @@ ${request}`;
             </Button>
             <Button
               variant="ghost"
-              className="min-h-9 px-3 text-xs"
+              className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
               onClick={() => setArtifactOnlyMode(true)}
               title="작업물만 1920 x 1080 원본 캔버스로 봅니다. 단축키: Ctrl+Shift+P"
             >
               <Maximize2 size={14} />
-              작업물만 보기
+              작업물 보기
             </Button>
-            <span className="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
+            <span className="shrink-0 whitespace-nowrap rounded-full border border-[var(--line)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
               {ARTIFACT_VIEWPORT_WIDTH}x{ARTIFACT_VIEWPORT_HEIGHT}
             </span>
           </div>
         </div>
 
-        <section className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] p-5">
-          <div className="mx-auto flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[var(--line-strong)] bg-white">
-            <div className="flex min-h-12 items-center justify-between border-b border-[var(--line)] bg-white px-4 text-xs text-[var(--muted)]">
+        <section className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] p-6">
+          <div className="mx-auto flex max-h-full w-full max-w-none flex-col overflow-hidden rounded-[24px] border border-[var(--line)] bg-white shadow-[0_18px_48px_rgba(31,41,55,0.06)]">
+            <div className="flex min-h-14 items-center justify-between border-b border-[var(--line)] bg-white px-5 text-xs text-[var(--muted)]">
               <span className="truncate font-mono">{ARTIFACT_PATH}</span>
               <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비"}</span>
             </div>
@@ -2858,16 +2956,16 @@ ${request}`;
                 title="Workspace preview"
                 src={previewFrameSrc(preview.url, selectionMode)}
                 className={cn(
-                  "h-[min(70vh,720px)] w-full bg-white",
+                  "h-[min(76vh,820px)] w-full bg-white",
                   selectionMode && "ring-4 ring-[var(--focus-ring)]",
                 )}
               />
             ) : (
               <div className="min-h-[560px] bg-[var(--panel-2)] p-5 text-[var(--ink)]">
-                <div className="rounded-xl border border-[var(--line)] bg-white">
+                <div className="overflow-hidden rounded-[22px] border border-[var(--line)] bg-white">
                   <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-black" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
                       <span className="truncate font-mono text-xs text-[var(--charcoal)]">
                         artifact://designforge-workbench
                       </span>
@@ -2876,9 +2974,9 @@ ${request}`;
                   </div>
                   <div className="grid gap-4 p-4 lg:grid-cols-[1fr_220px]">
                     <div className="space-y-4">
-                      <div className="rounded-xl border border-[var(--line)] bg-white p-5">
-                        <p className="font-mono text-xs text-[var(--muted)]">composer</p>
-                        <h3 className="mt-3 max-w-2xl break-keep text-3xl font-medium leading-tight tracking-normal text-[var(--ink-strong)]">
+                      <div className="rounded-[22px] border border-[var(--line)] bg-white p-6">
+                        <p className="text-sm font-semibold text-[var(--primary)]">composer</p>
+                        <h3 className="mt-3 max-w-2xl break-keep text-3xl font-bold leading-tight tracking-normal text-[var(--ink-strong)]">
                           요청에서 검증까지 한 화면에서 이어지는 DesignForge
                         </h3>
                         <p className="mt-4 max-w-2xl text-sm leading-6 text-[var(--muted)]">
@@ -2892,7 +2990,7 @@ ${request}`;
 
                       <div className="grid gap-3 md:grid-cols-3">
                         {["요청 해석", "시스템 갱신", "빌드 확인"].map((item, index) => (
-                          <div key={item} className="rounded-xl border border-[var(--line)] bg-white p-4">
+                          <div key={item} className="rounded-[20px] border border-[var(--line)] bg-white p-4">
                             <p className="font-mono text-xs text-[var(--mute)]">0{index + 1}</p>
                             <p className="mt-5 text-sm font-medium text-[var(--ink)]">{item}</p>
                           </div>
@@ -2900,7 +2998,7 @@ ${request}`;
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                    <div className="rounded-[22px] border border-[var(--line)] bg-[var(--panel-2)] p-4">
                       <p className="font-mono text-xs text-[var(--muted)]">outline</p>
                       <div className="mt-4 space-y-2">
                         {(anchors.length ? anchors : [{ id: "navigation", line: 0 } as AnchorInfo]).slice(0, 8).map((anchor) => (
@@ -2931,21 +3029,121 @@ ${request}`;
         </section>
       </main>
 
-      <aside
-        data-comment-anchor="pipeline-status"
-        className="flex min-h-0 flex-col overflow-y-auto border-l border-[var(--line)] bg-[var(--panel-dark)] px-5 py-5"
-      >
+      {showProjectPanel ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-20 bg-slate-900/10"
+            aria-label="프로젝트 목록 닫기"
+            onClick={() => setShowProjectPanel(false)}
+          />
+          <aside
+            data-comment-anchor="project-list"
+            className="fixed bottom-16 left-4 top-4 z-30 flex w-[410px] min-h-0 flex-col overflow-y-auto rounded-[24px] border border-[var(--line)] bg-white px-5 py-5 shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[var(--primary)]">projects</p>
+                <h2 className="truncate text-xl font-bold text-[var(--ink-strong)]">디자인 프로젝트</h2>
+              </div>
+              <Button variant="ghost" className="min-h-8 px-3 text-xs" onClick={() => setShowProjectPanel(false)}>
+                닫기
+              </Button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--muted)]">
+              <p className="font-medium text-[var(--ink)]">프로젝트 루트</p>
+              <p className="truncate font-mono">{projectRootPath}</p>
+            </div>
+
+            <Button className="mt-4 w-full" variant="primary" onClick={() => void createNewProject()} disabled={busy}>
+              <Plus size={16} />
+              새 프로젝트 만들기
+            </Button>
+
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
+              <h3 className="text-sm font-semibold text-[var(--ink-strong)]">프로젝트 목록</h3>
+              <Button variant="ghost" className="min-h-8 px-3 text-xs" onClick={() => void refreshProjects()}>
+                새로고침
+              </Button>
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              {projects.length === 0 ? (
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
+                  아직 생성된 프로젝트가 없습니다. 새 프로젝트를 만들면 독립된 채팅, 작업 기록, DESIGN.md, 생성 결과물을 갖는 디렉토리가 생성됩니다.
+                </div>
+              ) : null}
+              {projects.map((project) => {
+                const active = project.path === workspacePath;
+                return (
+                  <button
+                    key={project.path}
+                    type="button"
+                    className={cn(
+                      "w-full rounded-xl border p-4 text-left transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                      active
+                        ? "border-[var(--primary)] bg-blue-50"
+                        : "border-[var(--line)] bg-white hover:border-[var(--primary)] hover:bg-[var(--panel-2)]",
+                    )}
+                    onClick={() => void switchProject(project.path)}
+                    disabled={busy}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[var(--ink-strong)]">{project.name}</p>
+                        <p className="mt-1 truncate font-mono text-xs text-[var(--muted)]">{truncatePath(project.path)}</p>
+                      </div>
+                      <Badge tone={active ? "cyan" : "steel"}>{active ? "현재" : formatProjectTime(project.updatedAt)}</Badge>
+                    </div>
+                    {project.lastMessage ? (
+                      <p className="mt-3 line-clamp-2 text-xs leading-5 text-[var(--charcoal)]">{project.lastMessage}</p>
+                    ) : null}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge tone="steel">chat {project.chatCount}</Badge>
+                      <Badge tone={project.runCount ? "lime" : "steel"}>runs {project.runCount}</Badge>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+        </>
+      ) : null}
+
+      {showPipelinePanel ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-20 bg-slate-900/10"
+            aria-label="작업 파이프라인 닫기"
+            onClick={() => setShowPipelinePanel(false)}
+          />
+          <aside
+            data-comment-anchor="pipeline-status"
+            className="fixed bottom-16 right-4 top-4 z-30 flex w-[380px] min-h-0 flex-col overflow-y-auto rounded-[28px] border border-[var(--line)] bg-[var(--panel-dark)] px-5 py-6 shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
+          >
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-[var(--ink-strong)]">작업 파이프라인</h2>
-          <Badge tone={busy ? "cyan" : latestRun?.status === "error" ? "danger" : latestRun?.status === "success" ? "lime" : "steel"}>
-            {busy ? "실행 중" : latestRun?.status === "success" ? "생성 완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
-          </Badge>
+          <h2 className="text-lg font-bold text-[var(--ink-strong)]">작업 파이프라인</h2>
+          <div className="flex items-center gap-2">
+            <Badge tone={busy ? "cyan" : latestRun?.status === "error" ? "danger" : latestRun?.status === "success" ? "lime" : "steel"}>
+              {busy ? "실행 중" : latestRun?.status === "success" ? "생성 완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
+            </Badge>
+            <Button
+              variant="ghost"
+              className="min-h-8 px-3 text-xs"
+              onClick={() => setShowPipelinePanel(false)}
+              aria-label="작업 파이프라인 닫기"
+            >
+              닫기
+            </Button>
+          </div>
         </div>
 
-        <section data-comment-anchor="feature-list" className="mt-5 rounded-xl border border-[var(--line)] bg-white">
+        <section data-comment-anchor="feature-list" className="mt-5 rounded-[22px] border border-[var(--line)] bg-white shadow-[0_12px_30px_rgba(31,41,55,0.04)]">
           <div className="border-b border-[var(--line)] p-4">
-            <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design system</p>
-            <h2 className="mt-2 text-lg font-medium tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
+            <p className="text-sm font-semibold text-[var(--primary)]">design system</p>
+            <h2 className="mt-2 text-xl font-bold tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
           </div>
           {[
             ["Brief", latestBrief?.mode ?? generationMode, designHealth ? `${designHealth.score}/100` : "pending"],
@@ -2976,7 +3174,7 @@ ${request}`;
             <h3 className="text-sm font-semibold text-[var(--ink-strong)]">컴포넌트 직접 수정</h3>
             <Badge tone={selectedAnchorId ? "lime" : selectionMode ? "cyan" : "steel"}>{selectedAnchorLabel}</Badge>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3">
+          <div className="rounded-[22px] border border-[var(--line)] bg-white p-4 shadow-[0_10px_24px_rgba(31,41,55,0.04)]">
             <div className="flex items-start gap-2 text-xs leading-5 text-[var(--muted)]">
               <MousePointer2 size={15} className="mt-0.5 shrink-0 text-[var(--accent)]" />
               <p>
@@ -3016,7 +3214,7 @@ ${request}`;
                   }}
                   className={cn(
                     "flex min-h-8 items-center justify-between gap-2 rounded-full px-3 text-left text-xs transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
-                    selectedAnchorId === anchor.id ? "bg-black text-white" : "text-[var(--charcoal)] hover:bg-white",
+                    selectedAnchorId === anchor.id ? "bg-[var(--primary)] text-white" : "text-[var(--charcoal)] hover:bg-[var(--panel-2)]",
                   )}
                 >
                   <span className="truncate">@{anchor.id}</span>
@@ -3026,7 +3224,7 @@ ${request}`;
             </div>
 
             {selectedAnchor || previewSelection ? (
-              <div className="mt-3 rounded-xl border border-[var(--line)] bg-white p-3 text-[11px] leading-5 text-[var(--muted)]">
+              <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3 text-[11px] leading-5 text-[var(--muted)]">
                 <div className="flex items-center justify-between gap-3">
                   <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
                   <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
@@ -3042,7 +3240,7 @@ ${request}`;
               id="component-edit"
               value={componentEdit}
               onChange={(event) => setComponentEdit(event.target.value)}
-              className="mt-2 min-h-24 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-white p-3 text-xs leading-5 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+              className="mt-2 min-h-28 w-full resize-none rounded-[18px] border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
               placeholder="예: hero 문구만 더 짧게, CTA 색만 accent로 변경"
               disabled={busy}
             />
@@ -3059,7 +3257,7 @@ ${request}`;
 
         <section className="mt-5 grid gap-3" aria-label="파이프라인 단계">
           {steps.map((step) => (
-            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 border-b border-[var(--line)] pb-3">
+            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 rounded-[18px] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(31,41,55,0.035)]">
               <StepIcon status={step.status} />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-[var(--ink)]">{step.label}</p>
@@ -3077,7 +3275,7 @@ ${request}`;
           </div>
           <div className="grid gap-2">
             {visibleArtifacts.slice(0, 8).map((file) => (
-              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-3">
+              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-[18px] border border-[var(--line)] bg-white px-3 py-3">
                 {file.relativePath.endsWith(".md") ? <FileText size={14} /> : <Code2 size={14} />}
                 <span className="truncate font-mono text-xs text-[var(--ink)]">{file.relativePath}</span>
               </div>
@@ -3092,7 +3290,7 @@ ${request}`;
           </div>
           <div className="mt-3 grid gap-2">
             {verificationRows.map((check) => (
-              <div key={check.name} className="flex min-h-9 items-center justify-between gap-3 border-b border-[var(--line)] text-sm">
+              <div key={check.name} className="flex min-h-10 items-center justify-between gap-3 rounded-[16px] bg-white px-3 text-sm">
                 <span className="text-[var(--charcoal)]">{check.name}</span>
                 <Badge tone={check.tone}>{check.value}</Badge>
               </div>
@@ -3173,15 +3371,17 @@ ${request}`;
             ))}
           </div>
         </section>
-      </aside>
+          </aside>
+        </>
+      ) : null}
 
       <footer
         data-comment-anchor="footer"
-        className="col-span-3 flex min-h-12 items-center justify-between gap-4 border-t border-[var(--line)] bg-white px-5 text-sm text-[var(--muted)]"
+        className="col-span-2 flex min-h-14 items-center justify-between gap-4 border-t border-[var(--line)] bg-white px-6 text-sm text-[var(--muted)]"
       >
-        <span>DesignForge · local documentation-first workbench</span>
+        <span className="truncate">DesignForge · {activeProjectName}</span>
         <span className="truncate font-mono">
-          DESIGN.md synced · {ARTIFACT_PATH} · {preview ? "preview live" : "preview waiting"}
+          {workspacePath || projectRootPath} · {ARTIFACT_PATH} · {preview ? "preview live" : "preview waiting"}
         </span>
       </footer>
     </div>
@@ -3196,17 +3396,19 @@ function ChatRow({ message }: { message: ChatMessage }) {
     message.level === "error"
       ? "border-red-200 bg-red-50 text-red-800"
       : message.level === "success"
-        ? "border-[var(--line-strong)] bg-white text-[var(--ink)]"
+        ? "border-blue-100 bg-blue-50 text-[var(--primary-strong)]"
         : isUser
-          ? "border-black bg-black text-white"
-          : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]";
+          ? "border-[#101010] bg-[#101010] text-white"
+          : "border-[var(--line)] bg-white text-[var(--charcoal)]";
 
   return (
-    <div className={cn("flex min-w-0 max-w-full", isUser ? "justify-end" : "justify-start")}>
-      <div className={cn("min-w-0 max-w-[min(88%,58ch)] rounded-[20px] border px-5 py-4 text-base leading-8 shadow-sm", levelClass)}>
+    <div className="flex min-w-0 max-w-full justify-start">
+      <div className={cn("w-full min-w-0 rounded-xl border px-4 py-3 text-sm leading-6 shadow-[0_6px_18px_rgba(31,41,55,0.035)]", levelClass)}>
         <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="font-medium">{isUser ? "user" : message.kind ?? "DesignForge"}</span>
-          <span className={cn("shrink-0 font-mono text-[11px]", isUser ? "text-white/70" : "text-[var(--muted)]")}>{timestamp}</span>
+          <span className="font-semibold">{isUser ? "요청" : message.kind ?? "DesignForge"}</span>
+          <span className={cn("shrink-0 font-mono text-[10px]", isUser ? "text-white/55" : "text-[var(--muted)]")}>
+            {timestamp}
+          </span>
         </div>
         <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content}</p>
       </div>
@@ -3215,9 +3417,9 @@ function ChatRow({ message }: { message: ChatMessage }) {
 }
 
 function StepIcon({ status }: { status: StepStatus }) {
-  if (status === "done") return <CheckCircle2 size={14} className="mt-0.5 text-[var(--ink)]" />;
+  if (status === "done") return <CheckCircle2 size={14} className="mt-0.5 text-[var(--primary)]" />;
   if (status === "error") return <XCircle size={14} className="mt-0.5 text-red-300" />;
-  if (status === "active") return <Loader2 size={14} className="mt-0.5 animate-spin text-[var(--ink)]" />;
+  if (status === "active") return <Loader2 size={14} className="mt-0.5 animate-spin text-[var(--primary)]" />;
   return <Circle size={14} className="mt-0.5 text-[var(--mute)]" />;
 }
 

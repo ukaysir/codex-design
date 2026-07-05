@@ -10,7 +10,7 @@ DesignForge is for local developers and product designers who want a focused des
 
 ## Product Purpose
 
-DesignForge provides the local project structure around high-quality UI generation: a design brief, agent instructions, generated screen boundary, prompt studio, file editor, preview placeholder, and logs. Success means the app makes design generation repeatable instead of one-off prompt guessing.
+DesignForge provides the local project structure around high-quality UI generation: project-scoped chat, work history, a design brief, agent instructions, durable `DESIGN.md`, generated screen boundary, preview evidence, and logs. Success means the app turns natural-language design requests into repeatable design-quality decisions instead of one-off prompt guessing.
 
 ## Brand Personality
 
@@ -23,8 +23,10 @@ Avoid generic SaaS dashboards, decorative AI gradients, oversized marketing hero
 ## Design Principles
 
 - Generated UI has one clear home.
+- Each design project has its own directory, conversation, activity log, design system, and generated result.
 - The design system is an editable source of truth.
 - Prompts should preserve craft constraints, not just task text.
+- Natural-language requests should pass through explicit quality lenses: source truth, system first, content economy, visual distinctiveness, interaction realism, editability, asset integrity, and handoff.
 - Local files and local CLI execution remain explicit.
 - The interface should feel like a working tool, not a landing page.
 
