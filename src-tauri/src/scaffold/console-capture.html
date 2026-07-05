@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DesignForge Console Capture</title>
+    <style>
+      html,
+      body,
+      #preview {
+        border: 0;
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <script id="designforge-console" type="application/json">[]</script>
+    <iframe id="preview" title="DesignForge preview"></iframe>
+    <script>
+      const sink = document.getElementById("designforge-console");
+      const logs = [];
+
+      function save() {
+        sink.textContent = JSON.stringify(logs).replace(/<\/script/gi, "<\\/script");
+      }
+
+      function record(entry) {
+        logs.push(Object.assign({ timestamp: new Date().toISOString() }, entry));
+        save();
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.data && event.data.source === "designforge-console") {
+          record(event.data.entry);
+        }
+      });
+
+      function hookScript() {
+        return `<script>
+          (() => {
+            const send = (entry) => parent.postMessage({ source: "designforge-console", entry }, "*");
+            const format = (value) => {
+              try {
+                if (value instanceof Error) return value.stack || value.message;
+                if (typeof value === "string") return value;
+                return JSON.stringify(value);
+              } catch {
+                return String(value);
+              }
+            };
+
+            ["log", "info", "warn", "error"].forEach((level) => {
+              const original = console[level] && console[level].bind(console);
+              console[level] = (...args) => {
+                send({ type: "console", level, text: args.map(format).join(" ") });
+                if (original) original(...args);
+              };
+            });
+
+            window.addEventListener("error", (event) => {
+              send({
+                type: "error",
+                level: "error",
+                text: event.message,
+                source: event.filename,
+                line: event.lineno,
+                column: event.colno
+              });
+            });
+
+            window.addEventListener("unhandledrejection", (event) => {
+              send({ type: "unhandledrejection", level: "error", text: format(event.reason) });
+            });
+
+            send({ type: "status", level: "info", text: "console hook installed" });
+          })();
+        <\/script>`;
+      }
+
+      (async () => {
+        try {
+          const target = new URLSearchParams(location.search).get("target") || "/";
+          const html = await fetch(target, { cache: "no-store" }).then((response) => response.text());
+          const injected = `<base href="/">${hookScript()}`;
+          let source = html.replace(/<head([^>]*)>/i, `<head$1>${injected}`);
+          if (source === html) source = `${injected}${html}`;
+          document.getElementById("preview").srcdoc = source;
+          setTimeout(() => record({ type: "status", level: "info", text: "capture complete" }), 3000);
+        } catch (error) {
+          record({ type: "error", level: "error", text: error.stack || error.message || String(error) });
+        }
+      })();
+    </script>
+  </body>
+</html>

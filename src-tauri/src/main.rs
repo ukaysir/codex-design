@@ -16,6 +16,9 @@ use std::{
 };
 use tauri::{Emitter, State};
 
+mod scaffold;
+use scaffold::*;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceInfo {
@@ -215,7 +218,8 @@ fn open_workspace(path: String) -> Result<WorkspaceInfo, String> {
 fn create_project(project_root_path: String, name: Option<String>) -> Result<ProjectInfo, String> {
     let root = PathBuf::from(clean_input(&project_root_path));
     fs::create_dir_all(&root).map_err(|error| format!("Could not create project root: {error}"))?;
-    let root = fs::canonicalize(root).map_err(|error| format!("Could not resolve project root: {error}"))?;
+    let root = fs::canonicalize(root)
+        .map_err(|error| format!("Could not resolve project root: {error}"))?;
     if !root.is_dir() {
         return Err("Project root path is not a directory.".into());
     }
@@ -223,7 +227,8 @@ fn create_project(project_root_path: String, name: Option<String>) -> Result<Pro
     let display_name = clean_project_name(name.as_deref());
     let slug = slugify_project_name(&display_name);
     let project_dir = unique_project_dir(&root, &slug);
-    fs::create_dir_all(&project_dir).map_err(|error| format!("Could not create project directory: {error}"))?;
+    fs::create_dir_all(&project_dir)
+        .map_err(|error| format!("Could not create project directory: {error}"))?;
     create_default_files(&project_dir)?;
     write_project_manifest(&project_dir, &display_name)?;
     project_info(project_dir)
@@ -233,7 +238,8 @@ fn create_project(project_root_path: String, name: Option<String>) -> Result<Pro
 fn list_projects(project_root_path: String) -> Result<Vec<ProjectInfo>, String> {
     let root = PathBuf::from(clean_input(&project_root_path));
     fs::create_dir_all(&root).map_err(|error| format!("Could not create project root: {error}"))?;
-    let root = fs::canonicalize(root).map_err(|error| format!("Could not resolve project root: {error}"))?;
+    let root = fs::canonicalize(root)
+        .map_err(|error| format!("Could not resolve project root: {error}"))?;
     if !root.is_dir() {
         return Err("Project root path is not a directory.".into());
     }
@@ -245,7 +251,9 @@ fn list_projects(project_root_path: String) -> Result<Vec<ProjectInfo>, String> 
         }
     }
 
-    for entry in fs::read_dir(&root).map_err(|error| format!("Could not list project root: {error}"))? {
+    for entry in
+        fs::read_dir(&root).map_err(|error| format!("Could not list project root: {error}"))?
+    {
         let entry = entry.map_err(|error| format!("Could not read project entry: {error}"))?;
         let file_type = entry
             .file_type()
@@ -690,7 +698,9 @@ fn ensure_codex_app_server_process<'a>(
     }
 
     if manager.process.is_none() {
-        manager.process = Some(start_codex_app_server_process(app, run_id, codex_path, root)?);
+        manager.process = Some(start_codex_app_server_process(
+            app, run_id, codex_path, root,
+        )?);
     } else {
         emit_codex_status(app, run_id, "Codex app-server connection is already alive");
     }
@@ -778,7 +788,10 @@ fn start_codex_app_server_process(
         run_id,
         &mut state,
     )?;
-    write_json_line(&mut process.stdin, &json!({ "method": "initialized", "params": {} }))?;
+    write_json_line(
+        &mut process.stdin,
+        &json!({ "method": "initialized", "params": {} }),
+    )?;
     emit_codex_status(app, run_id, "Codex app-server persistent connection ready");
 
     Ok(process)
@@ -883,13 +896,19 @@ fn run_codex_app_server_blocking(
         ensure_codex_app_server_process(&mut manager, &app, &run_id, &codex_path, &root)?;
     }
 
-    let cached_thread = manager.threads.get(&workspace_key).map(|thread| thread.thread_id.clone());
+    let cached_thread = manager
+        .threads
+        .get(&workspace_key)
+        .map(|thread| thread.thread_id.clone());
     let had_cached_thread = cached_thread.is_some();
     let (mut thread_id, mut used_resume) = if let Some(thread_id) = cached_thread {
         emit_codex_status(
             &app,
             &run_id,
-            &format!("Codex app-server keeping live thread {}", short_for_log(&thread_id)),
+            &format!(
+                "Codex app-server keeping live thread {}",
+                short_for_log(&thread_id)
+            ),
         );
         (thread_id, true)
     } else {
@@ -1019,8 +1038,10 @@ fn run_codex_app_server_blocking(
             json_path_string(&turn_result, &["turn", "id"]).or_else(|| state.turn_id.clone());
     }
 
-    state.turn_id =
-        state.turn_id.clone().or_else(|| Some("unknown".to_string()));
+    state.turn_id = state
+        .turn_id
+        .clone()
+        .or_else(|| Some("unknown".to_string()));
 
     while !state.completed && state.failed_message.is_none() {
         let message = {
@@ -1244,7 +1265,10 @@ fn handle_codex_app_server_message(
             .and_then(|turn| turn.get("error"))
             .filter(|error| !error.is_null())
         {
-            state.failed_message = Some(format!("Codex turn completed with error: {}", compact_json(error)));
+            state.failed_message = Some(format!(
+                "Codex turn completed with error: {}",
+                compact_json(error)
+            ));
         }
     }
 
@@ -1702,8 +1726,8 @@ fn project_info(root: PathBuf) -> Result<ProjectInfo, String> {
     let chat_count = jsonl_count(root.join(".designforge/chat.jsonl"));
     let activity_count = jsonl_count(root.join(".designforge/activity.jsonl"));
     let run_count = jsonl_count(root.join(".designforge/runs.jsonl"));
-    let last_message =
-        last_jsonl_content(root.join(".designforge/chat.jsonl")).or_else(|| last_run_request(root.join(".designforge/runs.jsonl")));
+    let last_message = last_jsonl_content(root.join(".designforge/chat.jsonl"))
+        .or_else(|| last_run_request(root.join(".designforge/runs.jsonl")));
     Ok(ProjectInfo {
         path: root.to_string_lossy().to_string(),
         name: project_display_name(&root),
@@ -1819,7 +1843,11 @@ fn project_updated_time(root: &Path) -> SystemTime {
     .iter()
     .filter_map(|relative_path| root.join(relative_path).metadata().ok()?.modified().ok())
     .max()
-    .unwrap_or_else(|| root.metadata().and_then(|metadata| metadata.modified()).unwrap_or(UNIX_EPOCH))
+    .unwrap_or_else(|| {
+        root.metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH)
+    })
 }
 
 fn seconds_string(time: SystemTime) -> String {
@@ -2258,9 +2286,13 @@ fn copy_dir_if_exists(root: &Path, stage: &Path, relative_path: &str) -> Result<
 }
 
 fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
-    fs::create_dir_all(target).map_err(|error| format!("Could not create export directory: {error}"))?;
-    for entry in fs::read_dir(source).map_err(|error| format!("Could not read export directory: {error}"))? {
-        let entry = entry.map_err(|error| format!("Could not read export directory entry: {error}"))?;
+    fs::create_dir_all(target)
+        .map_err(|error| format!("Could not create export directory: {error}"))?;
+    for entry in
+        fs::read_dir(source).map_err(|error| format!("Could not read export directory: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Could not read export directory entry: {error}"))?;
         let file_type = entry
             .file_type()
             .map_err(|error| format!("Could not inspect export directory entry: {error}"))?;
@@ -2419,687 +2451,3 @@ fn browser_candidates() -> Vec<String> {
     }
     candidates
 }
-
-const CONSOLE_CAPTURE_HTML: &str = r##"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DesignForge Console Capture</title>
-    <style>
-      html,
-      body,
-      #preview {
-        border: 0;
-        height: 100%;
-        margin: 0;
-        width: 100%;
-      }
-    </style>
-  </head>
-  <body>
-    <script id="designforge-console" type="application/json">[]</script>
-    <iframe id="preview" title="DesignForge preview"></iframe>
-    <script>
-      const sink = document.getElementById("designforge-console");
-      const logs = [];
-
-      function save() {
-        sink.textContent = JSON.stringify(logs).replace(/<\/script/gi, "<\\/script");
-      }
-
-      function record(entry) {
-        logs.push(Object.assign({ timestamp: new Date().toISOString() }, entry));
-        save();
-      }
-
-      window.addEventListener("message", (event) => {
-        if (event.data && event.data.source === "designforge-console") {
-          record(event.data.entry);
-        }
-      });
-
-      function hookScript() {
-        return `<script>
-          (() => {
-            const send = (entry) => parent.postMessage({ source: "designforge-console", entry }, "*");
-            const format = (value) => {
-              try {
-                if (value instanceof Error) return value.stack || value.message;
-                if (typeof value === "string") return value;
-                return JSON.stringify(value);
-              } catch {
-                return String(value);
-              }
-            };
-
-            ["log", "info", "warn", "error"].forEach((level) => {
-              const original = console[level] && console[level].bind(console);
-              console[level] = (...args) => {
-                send({ type: "console", level, text: args.map(format).join(" ") });
-                if (original) original(...args);
-              };
-            });
-
-            window.addEventListener("error", (event) => {
-              send({
-                type: "error",
-                level: "error",
-                text: event.message,
-                source: event.filename,
-                line: event.lineno,
-                column: event.colno
-              });
-            });
-
-            window.addEventListener("unhandledrejection", (event) => {
-              send({ type: "unhandledrejection", level: "error", text: format(event.reason) });
-            });
-
-            send({ type: "status", level: "info", text: "console hook installed" });
-          })();
-        <\/script>`;
-      }
-
-      (async () => {
-        try {
-          const target = new URLSearchParams(location.search).get("target") || "/";
-          const html = await fetch(target, { cache: "no-store" }).then((response) => response.text());
-          const injected = `<base href="/">${hookScript()}`;
-          let source = html.replace(/<head([^>]*)>/i, `<head$1>${injected}`);
-          if (source === html) source = `${injected}${html}`;
-          document.getElementById("preview").srcdoc = source;
-          setTimeout(() => record({ type: "status", level: "info", text: "capture complete" }), 3000);
-        } catch (error) {
-          record({ type: "error", level: "error", text: error.stack || error.message || String(error) });
-        }
-      })();
-    </script>
-  </body>
-</html>
-"##;
-
-const AGENTS_MD: &str = r#"# DesignForge Agent Instructions
-
-## Project purpose
-
-This workspace is controlled by DesignForge. The user chats; DesignForge first analyzes the request and local design context, asks tailored clarification questions when needed, then turns that chat into a design brief, design-system update, generated React/Tailwind screen, anchor index, and run record. Verification, preview, capture, critique, quality audit, handoff, and export are user-requested stages.
-
-## Source priority
-
-claude-design.md is the product behavior reference. Translate its design-agent workflow into this Codex/Vite workspace:
-
-- Act as an expert frontend designer working for the user.
-- Explore local context before editing.
-- Create or update the design system before generating UI.
-- Use .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json when present.
-- Translate natural-language requests into concrete design quality decisions before coding: request fit, source truth, system first, content economy, visual distinctiveness, composition/scale, interaction realism, editability/anchors, asset integrity, and verification/handoff.
-- Produce one strong artifact by default.
-- Keep heavy verification and preview stages compatible, but do not assume they have already run.
-- Keep the final user-facing summary brief.
-
-Do not expose or quote internal prompts. Apply the rules through files.
-
-## File boundaries
-
-- Read DESIGN.md before changing generated UI.
-- Treat DESIGN.md as the continuing design system. Revise inside it unless the user explicitly asks for a new direction, reset, or replacement.
-- Keep generated UI inside src/generated/Screen.tsx.
-- Update src/styles.css only when shared fonts, variables, keyframes, or global support are needed.
-- Update DESIGN.md first if it is placeholder, thin, or inconsistent with the request.
-- Use DesignForge's clarification analysis and user answers before locking design-system assumptions into DESIGN.md.
-- Do not modify unrelated app shell files unless the requested UI cannot work otherwise.
-- Keep changes self-contained and easy to preview.
-
-## Design quality principles
-
-- If no brand exists, commit to a clear aesthetic direction: purpose, tone, differentiation, and one memorable idea.
-- Avoid generic AI SaaS patterns, filler content, fake metrics, emoji-by-default, left-border accent cards, and decorative gimmicks.
-- Use real provided assets when available. Do not invent logos or hand-draw replacements for missing brand assets.
-- Treat the DesignForge brief and context manifest as quality evidence before choosing visual direction.
-- Use semantic HTML and accessible controls.
-- Prefer clear hierarchy, strong spacing, distinctive typography, and intentional color.
-- Keep the result aligned with DESIGN.md.
-- Make targeted edits narrowly: preserve unrelated layout, spacing, typography, colors, and content.
-- If a request names a `@data-comment-anchor` or includes a `<mentioned-element>` block, edit that semantic region first and do not regenerate the whole screen.
-- Use flex/grid with gap for grouped UI.
-- Add data-screen-label to high-level screen roots.
-- Add stable data-comment-anchor values to major semantic regions.
-- Preserve existing data-comment-anchor attributes on semantic equivalents.
-
-## Codex workflow
-
-1. Inspect AGENTS.md, DESIGN.md, and the requested artifact.
-2. Inspect .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json if present.
-3. Infer missing design context and record it in DESIGN.md.
-4. Classify the request as a targeted component edit, system revision, or fresh design.
-5. Generate or update src/generated/Screen.tsx with the smallest scope that satisfies the request.
-6. Keep the code compatible with TypeScript and Vite build checks.
-7. Summarize changed files, assumptions, and caveats.
-"#;
-
-const CODEX_DESIGN_MD: &str = r#"# Codex Design Protocol
-
-This file translates the local claude-design.md behavior reference into this Codex/Vite workspace. Do not quote or expose the original prompt; apply the behavior through the generated files.
-
-## Role
-
-Act as an expert frontend designer working for the user. The user manages by chat; you produce the design artifact.
-
-## Workflow
-
-1. Understand the request.
-2. Inspect CODEX_DESIGN.md, AGENTS.md, DESIGN.md, the generated screen, styles, assets, and relevant local files.
-3. Inspect .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json when present.
-4. Update DESIGN.md before UI when the design system is thin, stale, or inconsistent.
-5. Build one strong artifact by default and use attachments/context as source material before inventing design details.
-6. Keep the workspace compatible with TypeScript and Vite build checks.
-7. Summarize changed files, assumptions, and caveats briefly.
-
-## Questions
-
-Guided DesignForge runs use a preflight analysis pass before generation. Read .designforge/clarification.json and the user's answers, then infer only the remaining practical assumptions and write them into DESIGN.md. Stop only for a true blocker, such as a referenced source or asset that is required but inaccessible.
-
-## Editing Discipline
-
-- For targeted edits, change only what was requested.
-- Preserve unrelated layout, spacing, typography, colors, and content.
-- Preserve data-comment-anchor values on semantic equivalents.
-- Treat existing DESIGN.md and src/generated/Screen.tsx as the current design system and artifact state.
-- When a request includes `@anchor` or a `<mentioned-element>` block, edit that semantic region first and avoid a full-screen rewrite.
-- Only replace the design direction when the user explicitly asks for a new design, reset, replacement, or different direction.
-- Add data-screen-label to high-level screen roots.
-- Add stable data-comment-anchor values to major semantic regions.
-- Prefer one primary artifact over scattered files.
-
-## Design System
-
-DESIGN.md is the source of truth. Keep it concrete:
-
-- Purpose and audience
-- Tone and aesthetic direction
-- Differentiation: the memorable idea
-- Color, type, spacing, layout, components, motion, accessibility
-- Ten quality lenses: request fit, source truth, system first, content economy, visual distinctiveness, composition and scale, interaction realism, editability and anchors, asset integrity, verification and handoff
-- Content rules and assumptions
-- Component inventory and stable anchor map
-- Revision notes for future edits
-- Verification caveats
-- Quality bar and unresolved design questions
-
-## Frontend Design
-
-If no brand system exists, commit to a bold, specific aesthetic direction before coding. Avoid generic defaults. Distinctive typography, intentional color, strong composition, and purposeful motion matter.
-
-Avoid:
-
-- Filler sections and lorem ipsum
-- Fake metrics
-- Generic SaaS dashboard composition
-- Emoji unless the brand calls for it
-- Decorative gradients without purpose
-- Cards with only a colored left-border accent
-- Hand-drawn replacement logos or icons when real assets are needed
-
-## Implementation
-
-- Main artifact: src/generated/Screen.tsx
-- Shared support only when needed: src/styles.css
-- Use React and Tailwind already present in the workspace.
-- Use semantic HTML and accessible controls.
-- Use flex/grid with gap for grouped UI.
-- Keep text literal and directly editable where practical.
-- Avoid unnecessary component splitting.
-- Add reduced-motion-safe behavior when adding animation.
-
-## Quality Audit
-
-When DesignForge asks for a quality audit, read prompts/quality-latest.md and .designforge/quality-audit.json. Improve only clear quality failures, preserve anchors, and keep verification compatibility. If the design is already strong, write a no-change verdict.
-"#;
-
-const DESIGN_MD: &str = r#"# Design System
-
-## Source Priority
-
-claude-design.md is the primary behavior reference, translated here for a local React/Tailwind/Vite workspace.
-
-## Request
-
-Pending first chat request. DesignForge will infer product identity and design direction automatically.
-
-## Assumptions
-
-- The user expects DesignForge to analyze the request and existing design context before asking tailored questions.
-- Missing context should be handled by practical assumptions recorded here.
-- Generated output should be a credible high-craft first screen that can be refined through chat.
-
-## Purpose
-
-Define the product, audience, job-to-be-done, and screen role before coding.
-
-## Tone
-
-Pick a specific direction rather than a generic default: refined, brutal, editorial, industrial, playful, luxurious, utilitarian, cinematic, or another direction that fits the request.
-
-## Differentiation
-
-Name the one visual or interaction idea the user should remember.
-
-## Visual Foundations
-
-- Color: background, surface, text, accent, border, semantic states, and contrast notes.
-- Typography: display/body/mono choices, scale, weights, line-height, and why they fit.
-- Layout: grid, density, spacing rhythm, responsive behavior, and composition rules.
-- Components: buttons, inputs, cards, navigation, feedback, empty states, and repeated patterns.
-- Motion: what moves, why it moves, duration/easing, and reduced-motion behavior.
-- Assets: real assets used or needed; do not invent logos or decorative replacements.
-
-## Quality Bar
-
-- Strong hierarchy: the primary message and action are obvious within five seconds.
-- Specific aesthetic direction: the design should not read like a generic AI SaaS template.
-- Useful content only: every section earns its place.
-- System continuity: repeated controls, cards, spacing, type, and tone follow the same vocabulary.
-- Implementation fidelity: responsive constraints, readable text, visible focus, and accessible controls.
-
-## Design Quality Lenses
-
-1. Request fit: identify artifact type, fidelity, audience, constraints, and option count.
-2. Source truth: inspect assets, code, design systems, screenshots, and prior chat before inventing visual rules.
-3. System first: lock purpose, tone, differentiation, typography, color, spacing, components, motion, and content rules before broad UI changes.
-4. Content economy: every section earns its place; no filler, fake metrics, or unrequested material.
-5. Visual distinctiveness: commit to a memorable aesthetic direction and avoid generic AI defaults.
-6. Composition and scale: choose layout density, hierarchy, viewport, responsive behavior, and type scale intentionally.
-7. Interaction realism: define hover, focus, active, loading, empty, error, validation, and navigation states when relevant.
-8. Editability and anchors: preserve targeted edits, stable data-comment-anchor values, literal text, and semantic regions.
-9. Asset integrity: use real provided assets, do not invent logos/icons, and avoid copyrighted recreation.
-10. Verification and handoff: keep output previewable, record assumptions/caveats, and document exact implementation details.
-
-## Interaction and State Model
-
-- Define hover, active, focus, loading, empty, error, success, and disabled states when the surface implies product interaction.
-- Prototype enough behavior to make the generated result feel real without making the code difficult to revise.
-- Use motion for comprehension, rhythm, or state change and respect reduced-motion preferences.
-
-## Responsive Rules
-
-- Name the primary viewport and any fixed canvas requirement before coding.
-- Ensure text, controls, and repeated items fit at desktop and narrower widths.
-- Use stable flex/grid constraints, explicit gaps, and intentional density.
-
-## Asset and Source Policy
-
-- Use provided assets, code, or design-system evidence as source of truth.
-- Do not invent logos, fake icons, fake metrics, or copyrighted UI details.
-- If assets are missing, record assumptions and use neutral placeholders.
-
-## Editability and Anchors
-
-- Keep user-visible copy literal and directly editable where practical.
-- Preserve existing data-comment-anchor values and add stable anchors for major semantic regions.
-- For targeted edits, change only the requested region and preserve unrelated layout, spacing, type, colors, and copy.
-
-## Component Inventory
-
-Track stable semantic regions and keep them aligned with `data-comment-anchor` values in `src/generated/Screen.tsx`.
-
-- navigation:
-- hero:
-- primary-action:
-- feature-list:
-- preview:
-- footer:
-
-## Revision Rules
-
-- Continue inside this design system unless the user explicitly asks for a new direction.
-- For a component-level request, edit only the matching anchor's semantic region.
-- Preserve unrelated layout, spacing, typography, color, copy, and anchor ids.
-- Record meaningful system changes here so future requests build on the same foundation.
-
-## Content Rules
-
-- No filler sections or lorem ipsum.
-- No fake metrics unless the request provides real data or asks for sample data.
-- Emoji only when appropriate to the product or provided brand.
-- Copy should match the product tone and stay concise.
-
-## Implementation Rules
-
-- Main generated screen: src/generated/Screen.tsx.
-- Keep high-level screen roots labelled with data-screen-label.
-- Add stable data-comment-anchor values to important semantic regions.
-- Preserve data-comment-anchor values during revisions.
-- Change only requested areas for targeted edits.
-- Use semantic HTML and accessible controls.
-- Use flex/grid with gap for grouped UI.
-- Update src/styles.css only for shared fonts, variables, keyframes, or global support.
-
-## Anti-patterns
-
-- Filler content
-- Fake metrics
-- Generic AI SaaS composition
-- Emoji unless explicitly appropriate
-- Decorative gradients without purpose
-- Cards with only a colored left-border accent
-- Unrelated shell/dependency changes
-
-## Verification
-
-The generated workspace should pass TypeScript and Vite build checks before preview. Record known caveats here.
-"#;
-
-const CONFIG_JSON: &str = r#"{
-  "name": "Untitled DesignForge Project",
-  "version": "0.1.0",
-  "framework": "react",
-  "styling": "tailwind",
-  "generatedEntry": "src/generated/Screen.tsx",
-  "designProtocol": "CODEX_DESIGN.md",
-  "designSystem": "DESIGN.md",
-  "designClarification": ".designforge/clarification.json",
-  "designBrief": ".designforge/brief.json",
-  "designContext": ".designforge/context.json",
-  "qualityAudit": ".designforge/quality-audit.json",
-  "mode": "chat-first",
-  "artifacts": ".designforge/artifacts.json"
-}
-"#;
-
-const ARTIFACTS_JSON: &str = r#"{
-  "activeArtifactId": "screen",
-  "artifacts": [
-    {
-      "id": "screen",
-      "type": "react-screen",
-      "path": "src/generated/Screen.tsx",
-      "name": "Generated Screen"
-    }
-  ]
-}
-"#;
-
-const ANCHORS_JSON: &str = r#"{
-  "updatedAt": "",
-  "artifactPath": "src/generated/Screen.tsx",
-  "anchors": []
-}
-"#;
-
-const WORKSPACE_SETTINGS_JSON: &str = r#"{
-  "codexPath": "codex",
-  "chatFirst": true,
-  "defaultArtifact": "screen"
-}
-"#;
-
-const WORKSPACE_PACKAGE_JSON: &str = r#"{
-  "name": "designforge-workspace",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5173",
-    "build": "node ./node_modules/vite/bin/vite.js build",
-    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit"
-  },
-  "dependencies": {
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
-  },
-  "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.22",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17",
-    "typescript": "^6.0.3",
-    "vite": "^8.1.3"
-  }
-}
-"#;
-
-const WORKSPACE_TSCONFIG: &str = r#"{
-  "compilerOptions": {
-    "target": "ES2022",
-    "useDefineForClassFields": true,
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx"
-  },
-  "include": ["src"]
-}
-"#;
-
-const WORKSPACE_TAILWIND_CONFIG: &str = r#"/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-};
-"#;
-
-const WORKSPACE_POSTCSS_CONFIG: &str = r#"module.exports = {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-};
-"#;
-
-const WORKSPACE_INDEX_HTML: &str = r#"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DesignForge Workspace</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-"#;
-
-const WORKSPACE_MAIN_TSX: &str = r#"import React from "react";
-import { createRoot } from "react-dom/client";
-import App from "./App";
-import "./styles.css";
-
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
-"#;
-
-const WORKSPACE_APP_TSX: &str = r##"import { useEffect } from "react";
-import Screen from "./generated/Screen";
-
-function closestAnchor(target: EventTarget | null) {
-  return target instanceof Element ? target.closest("[data-comment-anchor]") : null;
-}
-
-function targetElement(target: EventTarget | null, anchor: Element) {
-  return target instanceof Element && anchor.contains(target) ? target : anchor;
-}
-
-function siblingIndex(element: Element) {
-  const siblings = Array.from(element.parentElement?.children ?? []).filter((item) => item.tagName === element.tagName);
-  const index = siblings.indexOf(element);
-  return siblings.length > 1 && index >= 0 ? ":nth-of-type(" + (index + 1) + ")" : "";
-}
-
-function elementPath(element: Element) {
-  const path: string[] = [];
-  let current: Element | null = element;
-  while (current && current !== document.body && path.length < 8) {
-    const anchor = current.getAttribute("data-comment-anchor");
-    const screen = current.getAttribute("data-screen-label");
-    const id = current.id ? "#" + current.id : "";
-    const classes = (current.getAttribute("class") || "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 3)
-      .map((name) => "." + name.replace(/[^a-zA-Z0-9_-]/g, ""))
-      .join("");
-    path.unshift(
-      current.tagName.toLowerCase() +
-        id +
-        classes +
-        siblingIndex(current) +
-        (screen ? '[data-screen-label="' + screen + '"]' : "") +
-        (anchor ? '[data-comment-anchor="' + anchor + '"]' : ""),
-    );
-    current = current.parentElement;
-  }
-  return path;
-}
-
-function compactText(element: Element) {
-  return (element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 280);
-}
-
-function DesignForgeSelectionBridge() {
-  useEffect(() => {
-    const enabled = new URLSearchParams(window.location.search).get("designforgeSelect") === "1";
-    if (!enabled) return;
-
-    document.documentElement.setAttribute("data-designforge-select", "1");
-
-    const style = document.createElement("style");
-    style.id = "designforge-selection-style";
-    style.textContent = [
-      'html[data-designforge-select="1"] [data-comment-anchor], html[data-designforge-select="1"] [data-comment-anchor] * { cursor: crosshair; }',
-      'html[data-designforge-select="1"] [data-comment-anchor] { outline: 2px solid rgba(34, 211, 238, 0.22); outline-offset: 2px; }',
-      'html[data-designforge-select="1"] [data-comment-anchor] *:hover { outline: 2px solid rgba(190, 242, 100, 0.86); outline-offset: 2px; }',
-      'html[data-designforge-select="1"] [data-designforge-selected="true"] { outline: 3px solid #bef264 !important; outline-offset: 3px; }',
-    ].join("\n");
-    document.head.appendChild(style);
-
-    let selected: Element | null = null;
-
-    function handleClick(event: MouseEvent) {
-      const anchor = closestAnchor(event.target);
-      if (!anchor) return;
-      const element = targetElement(event.target, anchor);
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (selected) selected.removeAttribute("data-designforge-selected");
-      selected = element;
-      selected.setAttribute("data-designforge-selected", "true");
-
-      const anchorId = anchor.getAttribute("data-comment-anchor") || "";
-      const screenLabel =
-        anchor.closest("[data-screen-label]")?.getAttribute("data-screen-label") || "Generated Screen";
-      const text = compactText(element);
-      const anchorText = compactText(anchor);
-
-      window.parent.postMessage(
-        {
-          source: "designforge-preview-select",
-          anchorId,
-          screenLabel,
-          tagName: element.tagName.toLowerCase(),
-          anchorTagName: anchor.tagName.toLowerCase(),
-          text,
-          anchorText,
-          className: element.getAttribute("class") || "",
-          path: elementPath(element),
-          anchorPath: elementPath(anchor),
-        },
-        "*",
-      );
-    }
-
-    document.addEventListener("click", handleClick, true);
-    return () => {
-      document.removeEventListener("click", handleClick, true);
-      document.documentElement.removeAttribute("data-designforge-select");
-      style.remove();
-      if (selected) selected.removeAttribute("data-designforge-selected");
-    };
-  }, []);
-
-  return null;
-}
-
-export default function App() {
-  return (
-    <>
-      <DesignForgeSelectionBridge />
-      <Screen />
-    </>
-  );
-}
-"##;
-
-const WORKSPACE_STYLES_CSS: &str = r#"@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  color-scheme: dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
-:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 3px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 1ms !important;
-    scroll-behavior: auto !important;
-    transition-duration: 1ms !important;
-  }
-}
-"#;
-
-const WORKSPACE_SCREEN_TSX: &str = r#"export default function Screen() {
-  return (
-    <main data-screen-label="Generated Screen" className="min-h-screen bg-zinc-950 px-6 py-10 text-zinc-100">
-      <section className="mx-auto grid max-w-5xl gap-6">
-        <p className="font-mono text-sm text-cyan-300">Codex Design workspace</p>
-        <h1 className="max-w-3xl text-4xl font-semibold">Start from DESIGN.md, then shape one strong screen.</h1>
-        <p className="max-w-2xl text-lg leading-8 text-zinc-300">
-          The chat request updates the design system first, then generates this isolated React/Tailwind artifact.
-        </p>
-      </section>
-    </main>
-  );
-}
-"#;

@@ -1,0 +1,11 @@
+{
+  "activeArtifactId": "screen",
+  "artifacts": [
+    {
+      "id": "screen",
+      "type": "react-screen",
+      "path": "src/generated/Screen.tsx",
+      "name": "Generated Screen"
+    }
+  ]
+}

@@ -157,6 +157,8 @@ ${userRequest.trim() || "Create a polished image asset for this design project."
 Output contract:
 - Create final raster image files under assets/generated/.
 - Use descriptive kebab-case filenames.
+- If this prompt says "Single-image task", create exactly one final image for that task.
+- For section background images, leave enough negative space and contrast so UI text can sit above the image.
 - If a generated image is returned in another location, copy or move the chosen final file into assets/generated/.
 - Write .designforge/generated-images.json with updatedAt, request, imageFiles, sourcePrompt, and notes.
 - If the user explicitly asks to place the image into the screen, update src/generated/Screen.tsx and DESIGN.md while preserving existing anchors.

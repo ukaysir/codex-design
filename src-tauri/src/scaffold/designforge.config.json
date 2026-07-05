@@ -1,0 +1,15 @@
+{
+  "name": "Untitled DesignForge Project",
+  "version": "0.1.0",
+  "framework": "react",
+  "styling": "tailwind",
+  "generatedEntry": "src/generated/Screen.tsx",
+  "designProtocol": "CODEX_DESIGN.md",
+  "designSystem": "DESIGN.md",
+  "designClarification": ".designforge/clarification.json",
+  "designBrief": ".designforge/brief.json",
+  "designContext": ".designforge/context.json",
+  "qualityAudit": ".designforge/quality-audit.json",
+  "mode": "chat-first",
+  "artifacts": ".designforge/artifacts.json"
+}

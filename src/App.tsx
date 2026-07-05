@@ -24,6 +24,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import type { ButtonHTMLAttributes, ClipboardEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { ChatRow } from "./components/ChatRow";
 import {
   buildCritiquePrompt,
   buildDesignClarificationPrompt,
@@ -33,6 +34,26 @@ import {
   buildRepairPrompt,
   buildStructuredPrompt,
 } from "./lib/prompt-template";
+import {
+  agentLevel,
+  type AgentChatMeta,
+  buildAgentContent,
+  type ChatKind,
+  type ChatMessage,
+  codexEventLabel,
+  codexStatusMessage,
+  completedAgentText,
+  createIntroMessages,
+  dedupeMessages,
+  isActivityMessage,
+  parseChatMessageRecords,
+} from "./lib/chat-messages";
+import {
+  buildSectionImageTasks,
+  isImageGenerationRequest,
+  isMultiSectionImageRequest,
+  shouldApplyGeneratedImagesToScreen,
+} from "./lib/image-generation";
 import { callTauri } from "./lib/tauri";
 import { WORKSPACE_SELECTION_APP_TSX } from "./lib/workspace-bridge";
 import type {
@@ -114,31 +135,6 @@ const ARTIFACT_VIEWPORT_WIDTH = 1920;
 const ARTIFACT_VIEWPORT_HEIGHT = 1080;
 const MAX_LOGS = 300;
 const LOG_PREVIEW_CHARS = 2000;
-
-type ChatKind = "chat" | "status" | "tool" | "summary" | "agent" | "agent-result";
-
-type AgentChatStatus = "queued" | "active" | "done" | "error" | "info";
-
-type AgentChatMeta = {
-  runId: string;
-  phase: string;
-  title: string;
-  status: AgentChatStatus;
-  details?: string[];
-  threadId?: string | null;
-  artifactPath?: string;
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-  kind?: ChatKind;
-  level?: LogLevel;
-  attachments?: AttachmentInfo[];
-  agent?: AgentChatMeta;
-};
 
 type StepStatus = "idle" | "active" | "done" | "error";
 type ChatPanelTab = "conversation" | "history";
@@ -252,60 +248,8 @@ function cleanSettingValue(value: string) {
   return value.trim() || null;
 }
 
-function completedAgentText(event: CodexAppServerEvent) {
-  if (event.method !== "item/completed" || !event.params || typeof event.params !== "object") return null;
-  const item = (event.params as { item?: unknown }).item;
-  if (!item || typeof item !== "object") return null;
-  const candidate = item as { type?: unknown; text?: unknown };
-  return candidate.type === "agentMessage" && typeof candidate.text === "string" ? candidate.text : null;
-}
-
-function codexStatusMessage(event: CodexAppServerEvent) {
-  if (event.method !== "designforge/status" || !event.params || typeof event.params !== "object") return null;
-  const candidate = event.params as { message?: unknown };
-  return typeof candidate.message === "string" ? candidate.message : null;
-}
-
-function codexEventLabel(method?: string) {
-  if (!method) return "Codex 연결 대기";
-  if (method === "designforge/status") return "Codex 세션 준비";
-  if (method === "thread/started") return "대화 스레드 연결";
-  if (method === "turn/started") return "작업 턴 시작";
-  if (method === "item/started") return "파일/명령 작업 시작";
-  if (method === "item/agentMessage/delta") return "응답 작성 중";
-  if (method === "item/completed") return "작업 항목 완료";
-  if (method === "turn/completed") return "작업 턴 완료";
-  if (method === "error") return "Codex 오류";
-  return method.replaceAll("/", " / ");
-}
-
-function buildAgentContent(agent: AgentChatMeta) {
-  const details = agent.details?.length ? `\n${agent.details.map((detail) => `- ${detail}`).join("\n")}` : "";
-  return `${agent.title}${details}`;
-}
-
-function agentLevel(status: AgentChatStatus): LogLevel | undefined {
-  if (status === "error") return "error";
-  if (status === "done") return "success";
-  return "info";
-}
-
 function now() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function createIntroMessages(): ChatMessage[] {
-  return [
-    {
-      id: "intro",
-      role: "assistant",
-      content:
-        "만들고 싶은 화면을 말해 주세요. 필요한 경우 질문을 먼저 만들고, 답변과 첨부파일까지 묶어 실제 앱 파일을 변경합니다.",
-      createdAt: now(),
-      kind: "summary",
-      level: "info",
-    },
-  ];
 }
 
 function Button({
@@ -397,34 +341,6 @@ function sameWorkspaceFiles(left: WorkspaceFile[], right: WorkspaceFile[]) {
     left.length === right.length &&
     left.every((file, index) => file.relativePath === right[index]?.relativePath && file.isDirectory === right[index]?.isDirectory)
   );
-}
-
-function isActivityMessage(message: ChatMessage) {
-  return message.kind === "status" || message.kind === "tool";
-}
-
-function parseChatMessageRecords(raw: string) {
-  return raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Partial<ChatMessage>)
-    .filter(
-      (message): message is ChatMessage =>
-        typeof message.id === "string" &&
-        (message.role === "user" || message.role === "assistant") &&
-        typeof message.content === "string" &&
-        typeof message.createdAt === "string",
-    );
-}
-
-function dedupeMessages(messages: ChatMessage[]) {
-  const seen = new Set<string>();
-  return messages.filter((message) => {
-    if (seen.has(message.id)) return false;
-    seen.add(message.id);
-    return true;
-  });
 }
 
 function formatProjectTime(value: string) {
@@ -664,10 +580,6 @@ function inferAudienceAssumption(request: string) {
 function inferPurposeAssumption(request: string) {
   if (/수정|변경|바꿔|edit|fix|adjust/i.test(request)) return "Refine the existing artifact while preserving the current system.";
   return "Create a focused, high-craft frontend screen that can be iterated through chat.";
-}
-
-function isImageGenerationRequest(request: string) {
-  return /\$imagegen|이미지\s*(생성|만들|그려|제작)|그림\s*(생성|만들|그려|제작)|generate\s+(an?\s+)?image|create\s+(an?\s+)?image/i.test(request);
 }
 
 function isSmallRevisionRequest(request: string, hasTarget: boolean, hasAttachments: boolean) {
@@ -3183,6 +3095,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     const startedAt = new Date().toISOString();
     let path = "";
     let lastResult: CommandResult | null = null;
+    let placementResult: CommandResult | null = null;
+    let imageTaskResults: Array<{ id: string; label: string; files: string[]; error?: string }> = [];
 
     try {
       setStep("context", "active");
@@ -3194,26 +3108,82 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       await loadChatHistory(path);
       await loadActivityHistory(path);
       await appendChatMessage(path, "user", displayRequest, "chat", undefined, attachments);
-      await appendChatMessage(path, "assistant", "Codex 이미지 생성 기능으로 에셋을 만들겠습니다.", "status", "info");
-      const context = await writeDesignContextManifest(path);
+      const existingAnchorManifest = isMultiSectionImageRequest(request)
+        ? (await loadAnchorManifest(path)) ?? (await writeAnchorManifest(path).catch(() => null))
+        : null;
+      const imageTasks = isMultiSectionImageRequest(request)
+        ? buildSectionImageTasks(requestForCodex, existingAnchorManifest?.anchors ?? [], GENERATED_IMAGES_DIR)
+        : [{ id: "image", label: "requested image", prompt: requestForCodex }];
+      await appendAgentMessage(path, {
+        runId: crypto.randomUUID(),
+        phase: "image-plan",
+        title: isMultiSectionImageRequest(request) ? "섹션별 이미지 작업으로 나눴습니다." : "이미지 에셋 생성을 준비합니다.",
+        status: "done",
+        details: [
+          `${imageTasks.length}개 이미지 작업`,
+          shouldApplyGeneratedImagesToScreen(request) ? "생성 후 화면 배경 적용까지 이어갑니다." : "생성된 파일만 에셋으로 저장합니다.",
+          "각 작업은 독립 이미지 생성 턴으로 실행해서 다중 요청 실패를 줄입니다.",
+        ],
+      });
+      let context = await writeDesignContextManifest(path);
       setLatestContext(context);
       setStep("context", "done");
-
-      setStep("prompt", "active");
-      const prompt = await writeImageGenerationPrompt(path, requestForCodex, context);
-      await appendChatMessage(path, "assistant", `${IMAGE_PROMPT_PATH}에 이미지 생성 프롬프트를 준비했습니다.`, "tool", "success");
-      setStep("prompt", "done");
 
       setStep("codex", "active");
       const check = await callTauri<CommandResult>("check_codex", { codexPath: settings.codexPath });
       pushCommandResult("Codex check", check);
       if (!check.success) throw new Error("Codex CLI is not available.");
-      lastResult = await runCodexPrompt(path, prompt, "Codex image generation");
+      const imageFilesBeforeRun = await listGeneratedImageFiles(path);
+      for (const task of imageTasks) {
+        setStep("prompt", "active");
+        const prompt = await writeImageGenerationPrompt(path, task.prompt, context);
+        await appendAgentMessage(path, {
+          runId: crypto.randomUUID(),
+          phase: "image-prompt",
+          title: `${task.label} 이미지 프롬프트를 준비했습니다.`,
+          status: "done",
+          details: [IMAGE_PROMPT_PATH, `task=${task.id}`],
+        });
+        setStep("prompt", "done");
+
+        const beforeFiles = await listGeneratedImageFiles(path);
+        try {
+          lastResult = await runCodexPrompt(path, prompt, `Codex image generation: ${task.id}`);
+          const afterFiles = await listGeneratedImageFiles(path);
+          const beforeSet = new Set(beforeFiles);
+          const newFiles = afterFiles.filter((file) => !beforeSet.has(file));
+          imageTaskResults.push({ id: task.id, label: task.label, files: newFiles });
+          await appendAgentMessage(path, {
+            runId: crypto.randomUUID(),
+            phase: "image-generate",
+            title: `${task.label} 이미지 생성 턴이 완료됐습니다.`,
+            status: newFiles.length ? "done" : "info",
+            details: newFiles.length ? newFiles : [`새 파일을 감지하지 못했습니다. ${GENERATED_IMAGES_DIR} 전체를 다시 확인합니다.`],
+          });
+        } catch (error) {
+          const taskError = textFromError(error);
+          imageTaskResults.push({ id: task.id, label: task.label, files: [], error: taskError });
+          pushLog("error", `Image task ${task.id} failed: ${taskError}`);
+          await appendAgentMessage(path, {
+            runId: crypto.randomUUID(),
+            phase: "image-generate",
+            title: `${task.label} 이미지 생성이 실패했습니다.`,
+            status: "error",
+            details: [taskError, "다른 섹션 이미지 작업은 계속 시도합니다."],
+          });
+        }
+      }
       setStep("codex", "done");
 
       setStep("artifact", "active");
       await refreshFiles(path);
       const imageFiles = await listGeneratedImageFiles(path);
+      const imageFilesBeforeRunSet = new Set(imageFilesBeforeRun);
+      const newImageFiles = imageFiles.filter((file) => !imageFilesBeforeRunSet.has(file));
+      const imageFilesForApplication = newImageFiles.length ? newImageFiles : imageFiles;
+      if (!imageFiles.length && imageTaskResults.some((task) => task.error)) {
+        throw new Error(`모든 이미지 작업이 실패했습니다: ${imageTaskResults.map((task) => task.error).filter(Boolean).join(" / ")}`);
+      }
       await callTauri("write_file", {
         workspacePath: path,
         relativePath: GENERATED_IMAGES_PATH,
@@ -3223,6 +3193,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
             request: recordRequest,
             promptPath: IMAGE_PROMPT_PATH,
             imageFiles,
+            newImageFiles,
+            tasks: imageTaskResults,
             sourcePrompt: requestForCodex,
             notes: imageFiles.length
               ? [`${imageFiles.length} generated image file(s) found in ${GENERATED_IMAGES_DIR}.`]
@@ -3235,7 +3207,56 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       await refreshFiles(path);
       setStep("artifact", "done");
 
+      if (imageFilesForApplication.length && shouldApplyGeneratedImagesToScreen(request)) {
+        setStep("design", "active");
+        await appendAgentMessage(path, {
+          runId: crypto.randomUUID(),
+          phase: "image-apply",
+          title: "생성된 이미지를 화면 배경에 적용합니다.",
+          status: "active",
+          details: imageFilesForApplication,
+          artifactPath: ARTIFACT_PATH,
+        });
+        const applyRequest = [
+          recordRequest,
+          "",
+          "Use these generated image files as actual section backgrounds in the generated screen:",
+          ...imageFilesForApplication.map((file) => `- ${file}`),
+          "",
+          "Match each image to the most appropriate section. Preserve text readability with overlays, gradients, or layout changes as needed. Do not use remote image URLs.",
+        ].join("\n");
+        const designHealth = await prepareDesignSystem(path, applyRequest);
+        context = await writeDesignContextManifest(path);
+        setLatestContext(context);
+        const brief = await writeDesignBriefManifest(path, applyRequest, designHealth, context, null);
+        setLatestBrief(brief);
+        const applyPrompt = await writePrompt(path, applyRequest, brief, context, null);
+        setStep("codex", "active");
+        placementResult = await runCodexPrompt(path, applyPrompt, "Codex image placement");
+        setStep("codex", "done");
+        setStep("artifact", "active");
+        await refreshFiles(path);
+        const anchors = await writeAnchorManifest(path);
+        setAnchorManifest(anchors);
+        const tokenManifest = await writeTokenManifest(path);
+        setLatestTokenManifest(tokenManifest);
+        const staticCheck = await writeStaticCheckManifest(path);
+        setLatestStaticCheck(staticCheck);
+        await refreshFiles(path);
+        setStep("artifact", "done");
+        setStep("design", "done");
+        await appendAgentMessage(path, {
+          runId: crypto.randomUUID(),
+          phase: "image-apply",
+          title: "섹션 배경 적용이 완료됐습니다.",
+          status: "done",
+          details: [`${ARTIFACT_PATH} 갱신`, `${ANCHORS_PATH}: ${anchors.anchors.length} anchors`, `${STATIC_CHECK_PATH}: ${staticCheck.status}`],
+          artifactPath: ARTIFACT_PATH,
+        });
+      }
+
       const runId = crypto.randomUUID();
+      const finalResult = placementResult ?? lastResult;
       await recordRun(path, {
         id: runId,
         request: recordRequest,
@@ -3243,24 +3264,29 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         startedAt,
         finishedAt: new Date().toISOString(),
         promptPath: IMAGE_PROMPT_PATH,
-        artifactPath: GENERATED_IMAGES_DIR,
+        artifactPath: placementResult ? ARTIFACT_PATH : GENERATED_IMAGES_DIR,
         contextPath: CONTEXT_PATH,
-        codexExitCode: lastResult.code,
-        codexSessionId: lastResult.sessionId ?? codexSession?.sessionId,
-        codexUsedResume: lastResult.usedResume,
-        stdoutPreview: lastResult.stdout.trim().slice(0, 1000),
-        stderrPreview: lastResult.stderr.trim().slice(0, 1000),
+        codexExitCode: finalResult?.code ?? null,
+        codexSessionId: finalResult?.sessionId ?? codexSession?.sessionId,
+        codexUsedResume: finalResult?.usedResume,
+        stdoutPreview: finalResult?.stdout.trim().slice(0, 1000) ?? "",
+        stderrPreview: finalResult?.stderr.trim().slice(0, 1000) ?? "",
         repairAttempts: 0,
       });
-      await appendChatMessage(
-        path,
-        "assistant",
-        imageFiles.length
-          ? `이미지 생성이 완료됐습니다. ${imageFiles.map((file) => `\`${file}\``).join(", ")}`
-          : `이미지 생성 턴은 완료됐지만 ${GENERATED_IMAGES_DIR}에서 결과 파일을 찾지 못했습니다. Codex 출력과 ${GENERATED_IMAGES_PATH}를 확인하세요.`,
-        "summary",
-        imageFiles.length ? "success" : "info",
-      );
+      await appendAgentMessage(path, {
+        runId,
+        phase: "image-result",
+        title: placementResult ? "이미지 생성과 섹션 배경 적용이 완료됐습니다." : "이미지 생성이 완료됐습니다.",
+        status: imageFiles.length ? "done" : "info",
+        details: imageFiles.length
+          ? [
+              `${imageFiles.length}개 이미지 파일`,
+              ...imageFilesForApplication,
+              imageTaskResults.some((task) => task.error) ? "일부 이미지 작업은 실패했지만 생성된 파일로 계속 진행했습니다." : "모든 이미지 작업을 처리했습니다.",
+            ]
+          : [`이미지 생성 턴은 완료됐지만 ${GENERATED_IMAGES_DIR}에서 결과 파일을 찾지 못했습니다.`],
+        artifactPath: placementResult ? ARTIFACT_PATH : GENERATED_IMAGES_DIR,
+      });
       await refreshProjects();
     } catch (error) {
       const message = textFromError(error);
@@ -3277,15 +3303,21 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           promptPath: IMAGE_PROMPT_PATH,
           artifactPath: GENERATED_IMAGES_DIR,
           contextPath: CONTEXT_PATH,
-          codexExitCode: lastResult?.code ?? null,
-          codexSessionId: lastResult?.sessionId ?? codexSession?.sessionId,
-          codexUsedResume: lastResult?.usedResume,
-          stdoutPreview: lastResult?.stdout.trim().slice(0, 1000) ?? "",
-          stderrPreview: lastResult?.stderr.trim().slice(0, 1000) ?? "",
+          codexExitCode: (placementResult ?? lastResult)?.code ?? null,
+          codexSessionId: (placementResult ?? lastResult)?.sessionId ?? codexSession?.sessionId,
+          codexUsedResume: (placementResult ?? lastResult)?.usedResume,
+          stdoutPreview: (placementResult ?? lastResult)?.stdout.trim().slice(0, 1000) ?? "",
+          stderrPreview: (placementResult ?? lastResult)?.stderr.trim().slice(0, 1000) ?? "",
           repairAttempts: 0,
           error: message,
         });
-        await appendChatMessage(path, "assistant", `이미지 생성이 중단됐습니다: ${message}`, "summary", "error");
+        await appendAgentMessage(path, {
+          runId: crypto.randomUUID(),
+          phase: "image-error",
+          title: "이미지 생성이 중단됐습니다.",
+          status: "error",
+          details: [message, imageTaskResults.length ? `${imageTaskResults.length}개 작업 중 ${imageTaskResults.filter((task) => task.error).length}개 실패` : "작업 결과 없음"],
+        });
       } else {
         pushMessage("assistant", `이미지 생성이 중단됐습니다: ${message}`, "summary", "error");
       }
@@ -5103,116 +5135,6 @@ ${effectiveRequest}`;
         </>
       ) : null}
 
-    </div>
-  );
-}
-
-function ChatRow({ message }: { message: ChatMessage }) {
-  if (message.agent) return <AgentChatRow message={message} agent={message.agent} />;
-
-  const parsedDate = new Date(message.createdAt);
-  const timestamp = Number.isNaN(parsedDate.getTime()) ? message.createdAt : parsedDate.toLocaleTimeString();
-  const isUser = message.role === "user";
-  const levelClass =
-    message.level === "error"
-      ? "border-red-200 bg-red-50 text-red-800"
-      : message.level === "success"
-        ? "border-blue-100 bg-blue-50 text-[var(--primary-strong)]"
-        : isUser
-          ? "border-[#101010] bg-[#101010] text-white"
-          : "border-[var(--line)] bg-white text-[var(--charcoal)]";
-
-  return (
-    <div className="flex min-w-0 max-w-full justify-start">
-      <div className={cn("w-full min-w-0 rounded-lg border px-3 py-2 text-[12px] leading-5 shadow-[0_4px_14px_rgba(31,41,55,0.03)]", levelClass)}>
-        <div className="mb-1.5 flex items-center justify-between gap-3">
-          <span className="text-[11px] font-semibold">{isUser ? "요청" : message.kind ?? "DesignForge"}</span>
-          <span className={cn("shrink-0 font-mono text-[9px]", isUser ? "text-white/55" : "text-[var(--muted)]")}>
-            {timestamp}
-          </span>
-        </div>
-        <p className="whitespace-pre-wrap break-words text-[12px] leading-5 [overflow-wrap:anywhere]">{message.content}</p>
-        {message.attachments?.length ? (
-          <div className="mt-2 grid gap-1">
-            {message.attachments.map((attachment) => (
-              <div
-                key={attachment.id}
-                className={cn(
-                  "flex min-h-6 items-center justify-between gap-2 rounded-md border px-2 py-1 text-[10px]",
-                  isUser ? "border-white/20 bg-white/10 text-white/80" : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--muted)]",
-                )}
-              >
-                <span className="min-w-0 truncate">
-                  {attachment.kind} · {attachment.name}
-                </span>
-                <span className="shrink-0 font-mono">{Math.max(1, Math.round(attachment.size / 1024))}KB</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function agentStatusTone(status: AgentChatStatus): "lime" | "cyan" | "amber" | "danger" | "steel" {
-  if (status === "done") return "lime";
-  if (status === "active") return "cyan";
-  if (status === "error") return "danger";
-  if (status === "queued") return "amber";
-  return "steel";
-}
-
-function AgentChatRow({ message, agent }: { message: ChatMessage; agent: AgentChatMeta }) {
-  const parsedDate = new Date(message.createdAt);
-  const timestamp = Number.isNaN(parsedDate.getTime()) ? message.createdAt : parsedDate.toLocaleTimeString();
-  const isActive = agent.status === "active";
-  const isError = agent.status === "error";
-
-  return (
-    <div className="flex min-w-0 max-w-full justify-start">
-      <div
-        className={cn(
-          "w-full min-w-0 rounded-lg border bg-white px-3 py-2 text-[12px] leading-5 shadow-[0_4px_14px_rgba(31,41,55,0.03)]",
-          isError ? "border-red-200 bg-red-50 text-red-800" : "border-[var(--line)] text-[var(--charcoal)]",
-        )}
-      >
-        <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {isActive ? (
-              <Loader2 size={13} className="shrink-0 animate-spin text-[var(--primary)]" />
-            ) : isError ? (
-              <XCircle size={13} className="shrink-0 text-red-500" />
-            ) : (
-              <CheckCircle2 size={13} className="shrink-0 text-[var(--primary)]" />
-            )}
-            <span className="truncate text-[11px] font-bold text-[var(--ink-strong)]">{agent.phase}</span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Badge tone={agentStatusTone(agent.status)}>{agent.status}</Badge>
-            <span className="font-mono text-[9px] text-[var(--muted)]">{timestamp}</span>
-          </div>
-        </div>
-        <p className="whitespace-pre-wrap break-words text-[12px] font-semibold leading-5 text-[var(--ink)] [overflow-wrap:anywhere]">
-          {agent.title}
-        </p>
-        {agent.details?.length ? (
-          <ul className="mt-1.5 grid gap-1 text-[11px] leading-4 text-[var(--muted)]">
-            {agent.details.map((detail, index) => (
-              <li key={`${agent.runId}-${agent.phase}-${index}`} className="flex min-w-0 gap-1.5">
-                <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]" />
-                <span className="min-w-0 break-words [overflow-wrap:anywhere]">{detail}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {(agent.threadId || agent.artifactPath) && (
-          <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-[10px] text-[var(--muted)]">
-            {agent.threadId ? <span className="truncate rounded-md bg-[var(--panel-2)] px-2 py-1 font-mono">thread {shortSessionId(agent.threadId)}</span> : null}
-            {agent.artifactPath ? <span className="truncate rounded-md bg-[var(--panel-2)] px-2 py-1 font-mono">{agent.artifactPath}</span> : null}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

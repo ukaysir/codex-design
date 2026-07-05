@@ -459,6 +459,18 @@ Status: implemented.
 - Store agentic chat cards with optional phase/status/thread/artifact metadata in `.designforge/chat.jsonl`.
 - Show request context, design-system preparation, prompt compilation, Codex execution, artifact indexing, and next actions as compact chat timeline cards.
 - Preserve raw tool/status activity in `.designforge/activity.jsonl` so the chat stays conversational while still retaining evidence.
+- Split multi-section image-background requests into independent image-generation turns, keep partial successes, and run a follow-up placement turn when generated files should be applied to the screen.
+
+### Phase 11 - Maintainability Split
+
+Status: implemented.
+
+- Move image-generation request classification and section-background task planning into `src/lib/image-generation.ts`.
+- Move chat message types, parsing, agent labels, and activity filtering into `src/lib/chat-messages.ts`.
+- Move chat row rendering into `src/components/ChatRow.tsx`.
+- Move large Rust scaffold/capture template text into `src-tauri/src/scaffold/` and expose it through `src-tauri/src/scaffold.rs`.
+- Keep `src/App.tsx` and `src-tauri/src/main.rs` functional while reducing their direct ownership of pure helper logic and large template content.
+- Validate the split with TypeScript build checks, Rust check/clippy/test, diff whitespace checks, scaffold raw-string searches, and a full Tauri release build.
 
 ## Verification Snapshot
 
