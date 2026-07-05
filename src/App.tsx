@@ -274,7 +274,7 @@ function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+        "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-65 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
         variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_8px_18px_rgba(49,130,246,0.18)] hover:bg-[var(--primary-strong)]",
         variant === "secondary" &&
           "border border-[var(--line-strong)] bg-white text-[var(--ink)] hover:border-[var(--accent)] hover:bg-white hover:text-[var(--accent)]",
@@ -4085,35 +4085,37 @@ ${effectiveRequest}`;
                     <Button
                       type="button"
                       variant="secondary"
-                      className="h-8 min-h-8 w-8 shrink-0 px-0 text-[var(--ink)]"
+                      className="h-8 min-h-8 w-12 shrink-0 gap-1 bg-[var(--panel-2)] px-1 text-[var(--primary-strong)]"
                       onClick={() => {
                         const imageRequest = input.trim() || "DesignForge에서 사용할 이미지를 생성하세요.";
                         const attachments = pendingAttachments;
                         setPendingAttachments([]);
                         void runImageGenerationRequest(imageRequest, { attachments });
                       }}
-                      disabled={busy || (!input.trim() && pendingAttachments.length === 0)}
+                      disabled={busy}
                       title="Codex $imagegen으로 이미지 에셋을 생성합니다."
                       aria-label="이미지 생성"
                     >
-                      <ImageIcon size={14} />
+                      <ImageIcon size={13} strokeWidth={2.6} />
+                      <span className="text-[10px] font-bold leading-none">AI</span>
                     </Button>
                     <Button
                       type="button"
                       variant="secondary"
-                      className="h-8 min-h-8 w-8 shrink-0 px-0 text-[var(--ink)]"
+                      className="h-8 min-h-8 w-12 shrink-0 gap-1 bg-[var(--panel-2)] px-1 text-[var(--primary-strong)]"
                       onClick={() => document.getElementById("designforge-attachments")?.click()}
                       disabled={busy}
                       title="파일 첨부"
                       aria-label="파일 첨부"
                     >
-                      <Paperclip size={14} />
+                      <Paperclip size={13} strokeWidth={2.6} />
+                      <span className="text-[10px] font-bold leading-none">파일</span>
                     </Button>
                   </div>
                   <div className="flex min-w-0 justify-end gap-1.5">
                     <Button
                       variant="secondary"
-                      className="h-8 min-h-8 w-8 shrink-0 px-0 text-[var(--ink)]"
+                      className="h-8 min-h-8 w-8 shrink-0 bg-[var(--panel-2)] px-0 text-[var(--ink-strong)]"
                       onClick={() => {
                         setInput("");
                         setGuidedDraft(null);
@@ -4123,7 +4125,7 @@ ${effectiveRequest}`;
                       title="입력 비우기"
                       aria-label="입력 비우기"
                     >
-                      <X size={14} />
+                      <span className="text-xs font-black leading-none">X</span>
                     </Button>
                     <Button variant="primary" onClick={runChat} disabled={busy || (!input.trim() && pendingAttachments.length === 0)} className="h-8 min-h-8 shrink-0 px-3 text-[11px]">
                       {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
