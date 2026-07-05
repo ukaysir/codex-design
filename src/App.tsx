@@ -2804,7 +2804,7 @@ ${request}`;
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="relative grid h-screen min-w-[1180px] grid-cols-[320px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+      className="relative grid h-screen min-w-[1180px] grid-cols-[320px_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
     >
       <aside
         data-comment-anchor="navigation"
@@ -3004,26 +3004,9 @@ ${request}`;
       </aside>
 
       <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-white">
-        <div className="flex min-h-28 flex-col justify-center gap-3 border-b border-[var(--line)] px-6 py-4">
-          <div className="flex min-w-0 items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-[var(--primary)]">실시간 프리뷰</p>
-              <h2 className="truncate text-3xl font-bold tracking-normal text-[var(--ink-strong)]">생성 화면 미리보기</h2>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
-              <Button
-                variant={showPipelinePanel ? "primary" : "secondary"}
-                className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
-                onClick={() => setShowPipelinePanel((current) => !current)}
-                title="작업 파이프라인과 검증 패널을 엽니다."
-              >
-                <Terminal size={14} />
-                파이프라인
-              </Button>
-            </div>
-          </div>
+        <div className="flex min-h-14 items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
             <Button
               variant="ghost"
               className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
@@ -3065,9 +3048,18 @@ ${request}`;
               {ARTIFACT_VIEWPORT_WIDTH}x{ARTIFACT_VIEWPORT_HEIGHT}
             </span>
           </div>
+          <Button
+            variant={showPipelinePanel ? "primary" : "secondary"}
+            className="min-h-9 shrink-0 whitespace-nowrap px-3 text-xs"
+            onClick={() => setShowPipelinePanel((current) => !current)}
+            title="작업 파이프라인과 검증 패널을 엽니다."
+          >
+            <Terminal size={14} />
+            파이프라인
+          </Button>
         </div>
 
-        <section className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] p-6">
+        <section className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] p-4">
           <div className="mx-auto flex max-h-full w-full max-w-none flex-col overflow-hidden rounded-[24px] border border-[var(--line)] bg-white shadow-[0_18px_48px_rgba(31,41,55,0.06)]">
             <div className="flex min-h-14 items-center justify-between border-b border-[var(--line)] bg-white px-5 text-xs text-[var(--muted)]">
               <span className="truncate font-mono">{ARTIFACT_PATH}</span>
@@ -3582,15 +3574,6 @@ ${request}`;
         </>
       ) : null}
 
-      <footer
-        data-comment-anchor="footer"
-        className="col-span-2 flex min-h-14 items-center justify-between gap-4 border-t border-[var(--line)] bg-white px-6 text-sm text-[var(--muted)]"
-      >
-        <span className="truncate">DesignForge · {activeProjectName}</span>
-        <span className="truncate font-mono">
-          {workspacePath || projectRootPath} · {ARTIFACT_PATH} · {preview ? "preview live" : "preview waiting"}
-        </span>
-      </footer>
     </div>
   );
 }
