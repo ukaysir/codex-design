@@ -2856,7 +2856,7 @@ ${request}`;
           {chatPanelTab === "conversation" ? (
             <>
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-0 py-2">
-                <div className="grid gap-3">
+                <div className="grid gap-2">
                   {conversationMessages.slice(-60).map((message) => (
                     <ChatRow key={message.id} message={message} />
                   ))}
@@ -2875,18 +2875,18 @@ ${request}`;
                 </div>
               </div>
 
-              <div data-comment-anchor="hero" className="rounded-2xl border border-[var(--line)] bg-white p-3 shadow-[0_8px_24px_rgba(31,41,55,0.06)]">
+              <div data-comment-anchor="hero" className="rounded-xl border border-[var(--line)] bg-white p-2.5 shadow-[0_6px_18px_rgba(31,41,55,0.05)]">
                 {guidedDraft ? (
-                  <div className="mb-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--charcoal)]">
+                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--charcoal)]">
                     <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
                     <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
                   </div>
                 ) : null}
 
-                <label className="mb-2 inline-flex min-h-8 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-medium text-[var(--charcoal)]">
+                <label className="mb-2 inline-flex min-h-7 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-2.5 text-[11px] font-medium text-[var(--charcoal)]">
                   <input
                     type="checkbox"
-                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                    className="h-3 w-3 accent-[var(--primary)]"
                     checked={generationMode === "variations"}
                     onChange={(event) => selectGenerationMode(event.target.checked ? "variations" : "guided")}
                     disabled={busy || Boolean(guidedDraft)}
@@ -2904,18 +2904,18 @@ ${request}`;
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
                   }}
-                  className="min-h-28 w-full resize-none rounded-2xl border border-[var(--line-strong)] bg-white p-4 text-sm leading-7 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] shadow-[0_8px_24px_rgba(31,41,55,0.05)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+                  className="min-h-[72px] max-h-32 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-white px-3 py-2.5 text-[12px] leading-5 text-[var(--ink)] outline-none placeholder:text-[12px] placeholder:text-[var(--mute)] shadow-[0_6px_18px_rgba(31,41,55,0.045)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
                   placeholder={
                     guidedDraft
                       ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
-                      : "DesignForge에게 만들고 싶은 화면이나 수정할 컴포넌트를 대화하듯 입력하세요."
+                      : "만들고 싶은걸 입력하세요"
                   }
                   disabled={busy}
                 />
-                <div data-comment-anchor="primary-action" className="mt-3 flex justify-end gap-2">
+                <div data-comment-anchor="primary-action" className="mt-2 flex justify-end gap-2">
                   <Button
                     variant="secondary"
-                    className="min-h-8 px-4 text-xs"
+                    className="min-h-7 px-3 text-[11px]"
                     onClick={() => {
                       setInput("");
                       setGuidedDraft(null);
@@ -2925,8 +2925,8 @@ ${request}`;
                   >
                     비우기
                   </Button>
-                  <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-8 px-5 text-xs">
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                  <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-7 px-3 text-[11px]">
+                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                     {guidedDraft ? "답변 보내기" : "보내기"}
                   </Button>
                 </div>
@@ -3610,14 +3610,14 @@ function ChatRow({ message }: { message: ChatMessage }) {
 
   return (
     <div className="flex min-w-0 max-w-full justify-start">
-      <div className={cn("w-full min-w-0 rounded-xl border px-4 py-3 text-sm leading-6 shadow-[0_6px_18px_rgba(31,41,55,0.035)]", levelClass)}>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="font-semibold">{isUser ? "요청" : message.kind ?? "DesignForge"}</span>
-          <span className={cn("shrink-0 font-mono text-[10px]", isUser ? "text-white/55" : "text-[var(--muted)]")}>
+      <div className={cn("w-full min-w-0 rounded-lg border px-3 py-2 text-[12px] leading-5 shadow-[0_4px_14px_rgba(31,41,55,0.03)]", levelClass)}>
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <span className="text-[11px] font-semibold">{isUser ? "요청" : message.kind ?? "DesignForge"}</span>
+          <span className={cn("shrink-0 font-mono text-[9px]", isUser ? "text-white/55" : "text-[var(--muted)]")}>
             {timestamp}
           </span>
         </div>
-        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content}</p>
+        <p className="whitespace-pre-wrap break-words text-[12px] leading-5 [overflow-wrap:anywhere]">{message.content}</p>
       </div>
     </div>
   );
