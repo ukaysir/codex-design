@@ -4,6 +4,7 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
+    collections::HashMap,
     env, fs,
     io::{BufRead, BufReader, Read, Seek, Write},
     net::TcpStream,
@@ -71,6 +72,94 @@ struct CodexAppServerRunState {
     completed: bool,
     failed_message: Option<String>,
     event_count: usize,
+}
+
+#[derive(Clone, Default)]
+struct CodexAppServerState(Arc<Mutex<CodexAppServerManager>>);
+
+#[derive(Default)]
+struct CodexAppServerManager {
+    process: Option<CodexAppServerProcess>,
+    threads: HashMap<String, CodexWorkspaceThread>,
+}
+
+struct CodexAppServerProcess {
+    child: Child,
+    stdin: ChildStdin,
+    reader: BufReader<ChildStdout>,
+    stderr_buffer: Arc<Mutex<String>>,
+    next_id: u64,
+    codex_path: String,
+}
+
+struct CodexWorkspaceThread {
+    thread_id: String,
+    workspace_path: String,
+}
+
+struct CodexThreadStartOptions<'a> {
+    root_string: &'a str,
+    sandbox: &'a str,
+    resume_session_id: Option<&'a str>,
+    model: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexAppServerStatus {
+    running: bool,
+    pid: Option<u32>,
+    workspace_path: Option<String>,
+    thread_id: Option<String>,
+    thread_count: usize,
+}
+
+impl CodexAppServerManager {
+    fn stop_process(&mut self) {
+        if let Some(mut process) = self.process.take() {
+            process.kill();
+        }
+        self.threads.clear();
+    }
+
+    fn status(&mut self, workspace_path: Option<String>) -> CodexAppServerStatus {
+        let mut running = false;
+        let mut pid = None;
+        if let Some(process) = self.process.as_mut() {
+            match process.child.try_wait() {
+                Ok(Some(_)) | Err(_) => {
+                    self.stop_process();
+                }
+                Ok(None) => {
+                    running = true;
+                    pid = Some(process.child.id());
+                }
+            }
+        }
+
+        let thread_key = workspace_path.as_deref();
+        let thread = thread_key.and_then(|key| self.threads.get(key));
+        CodexAppServerStatus {
+            running,
+            pid,
+            workspace_path: thread.map(|value| value.workspace_path.clone()),
+            thread_id: thread.map(|value| value.thread_id.clone()),
+            thread_count: self.threads.len(),
+        }
+    }
+}
+
+impl CodexAppServerProcess {
+    fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for CodexAppServerProcess {
+    fn drop(&mut self) {
+        self.kill();
+    }
 }
 
 #[derive(Serialize)]
@@ -269,6 +358,50 @@ fn check_codex(codex_path: String) -> Result<CommandResult, String> {
 }
 
 #[tauri::command]
+fn codex_app_server_status(
+    state: State<CodexAppServerState>,
+    workspace_path: Option<String>,
+) -> Result<CodexAppServerStatus, String> {
+    let workspace_key = workspace_path
+        .as_deref()
+        .and_then(|path| canonical_workspace(path).ok())
+        .map(|path| path.to_string_lossy().to_string())
+        .or(workspace_path);
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "Codex app-server state is unavailable.".to_string())?;
+    Ok(manager.status(workspace_key))
+}
+
+#[tauri::command]
+fn stop_codex_app_server(state: State<CodexAppServerState>) -> Result<(), String> {
+    let mut manager = state
+        .0
+        .lock()
+        .map_err(|_| "Codex app-server state is unavailable.".to_string())?;
+    manager.stop_process();
+    Ok(())
+}
+
+#[tauri::command]
+fn reset_codex_app_server_session(
+    state: State<CodexAppServerState>,
+    workspace_path: String,
+) -> Result<(), String> {
+    let root = canonical_workspace(&workspace_path)?;
+    let workspace_key = root.to_string_lossy().to_string();
+    {
+        let mut manager = state
+            .0
+            .lock()
+            .map_err(|_| "Codex app-server state is unavailable.".to_string())?;
+        manager.threads.remove(&workspace_key);
+    }
+    remove_workspace_file_if_exists(&root, ".designforge/codex-session.json")
+}
+
+#[tauri::command]
 async fn run_codex(
     workspace_path: String,
     codex_path: String,
@@ -294,6 +427,7 @@ async fn run_codex(
 #[allow(clippy::too_many_arguments)]
 async fn run_codex_app_server(
     app: tauri::AppHandle,
+    state: State<'_, CodexAppServerState>,
     workspace_path: String,
     codex_path: String,
     prompt: String,
@@ -302,9 +436,11 @@ async fn run_codex_app_server(
     model: Option<String>,
     effort: Option<String>,
 ) -> Result<CommandResult, String> {
+    let state = state.inner().clone();
     run_blocking(move || {
         run_codex_app_server_blocking(
             app,
+            state,
             workspace_path,
             codex_path,
             prompt,
@@ -533,35 +669,47 @@ fn clean_optional_cli_value(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_codex_app_server_blocking(
-    app: tauri::AppHandle,
-    workspace_path: String,
-    codex_path: String,
-    prompt: String,
-    resume_session_id: Option<String>,
-    run_id: String,
-    model: Option<String>,
-    effort: Option<String>,
-) -> Result<CommandResult, String> {
-    if prompt.trim().is_empty() {
-        return Err("Prompt is empty.".into());
+fn ensure_codex_app_server_process<'a>(
+    manager: &'a mut CodexAppServerManager,
+    app: &tauri::AppHandle,
+    run_id: &str,
+    codex_path: &str,
+    root: &Path,
+) -> Result<&'a mut CodexAppServerProcess, String> {
+    let restart = match manager.process.as_mut() {
+        Some(process) if process.codex_path != codex_path => true,
+        Some(process) => match process.child.try_wait() {
+            Ok(Some(_)) | Err(_) => true,
+            Ok(None) => false,
+        },
+        None => true,
+    };
+
+    if restart {
+        manager.stop_process();
     }
 
-    let root = canonical_workspace(&workspace_path)?;
-    let prompt_file = write_codex_prompt_file(&root, &prompt)?;
-    let prompt_instruction = format!(
-        "Read the full task from this workspace file and follow it exactly: {}",
-        prompt_file
-    );
-    let root_string = root.to_string_lossy().to_string();
-    let sandbox = default_codex_sandbox();
-    let model = clean_optional_cli_value(model.as_deref()).map(str::to_string);
-    let effort = clean_optional_cli_value(effort.as_deref()).map(str::to_string);
+    if manager.process.is_none() {
+        manager.process = Some(start_codex_app_server_process(app, run_id, codex_path, root)?);
+    } else {
+        emit_codex_status(app, run_id, "Codex app-server connection is already alive");
+    }
 
-    let mut command = Command::new(tool_path(&codex_path));
+    manager
+        .process
+        .as_mut()
+        .ok_or_else(|| "Codex app-server process is unavailable.".to_string())
+}
+
+fn start_codex_app_server_process(
+    app: &tauri::AppHandle,
+    run_id: &str,
+    codex_path: &str,
+    root: &Path,
+) -> Result<CodexAppServerProcess, String> {
+    let mut command = Command::new(tool_path(codex_path));
     command
-        .current_dir(&root)
+        .current_dir(root)
         .arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -584,7 +732,7 @@ fn run_codex_app_server_blocking(
         .stderr
         .take()
         .ok_or_else(|| "Could not capture Codex app-server stderr.".to_string())?;
-    let mut stdin = child
+    let stdin = child
         .stdin
         .take()
         .ok_or_else(|| "Could not open Codex app-server stdin.".to_string())?;
@@ -602,15 +750,21 @@ fn run_codex_app_server_blocking(
         }
     });
 
-    let mut reader = BufReader::new(stdout);
+    let mut process = CodexAppServerProcess {
+        child,
+        stdin,
+        reader: BufReader::new(stdout),
+        stderr_buffer,
+        next_id: 1,
+        codex_path: codex_path.to_string(),
+    };
     let mut state = CodexAppServerRunState::default();
-    let mut next_id = 1_u64;
 
-    emit_codex_status(&app, &run_id, "Codex app-server starting");
+    emit_codex_status(app, run_id, "Codex app-server starting");
     codex_rpc_request(
-        &mut reader,
-        &mut stdin,
-        &mut next_id,
+        &mut process.reader,
+        &mut process.stdin,
+        &mut process.next_id,
         "initialize",
         json!({
             "clientInfo": {
@@ -620,65 +774,151 @@ fn run_codex_app_server_blocking(
             },
             "capabilities": { "experimentalApi": true }
         }),
-        &app,
-        &run_id,
+        app,
+        run_id,
         &mut state,
     )?;
-    write_json_line(&mut stdin, &json!({ "method": "initialized", "params": {} }))?;
+    write_json_line(&mut process.stdin, &json!({ "method": "initialized", "params": {} }))?;
+    emit_codex_status(app, run_id, "Codex app-server persistent connection ready");
 
+    Ok(process)
+}
+
+fn resume_or_start_codex_thread(
+    process: &mut CodexAppServerProcess,
+    app: &tauri::AppHandle,
+    run_id: &str,
+    options: CodexThreadStartOptions<'_>,
+    state: &mut CodexAppServerRunState,
+) -> Result<(String, bool), String> {
     let mut used_resume = false;
-    let thread_result = if let Some(session_id) = resume_session_id.as_deref() {
+    let result = if let Some(session_id) = options.resume_session_id {
         used_resume = true;
-        let mut params = codex_thread_params(&root_string, sandbox, model.as_deref());
+        let mut params = codex_thread_params(options.root_string, options.sandbox, options.model);
         params["threadId"] = json!(session_id);
         match codex_rpc_request(
-            &mut reader,
-            &mut stdin,
-            &mut next_id,
+            &mut process.reader,
+            &mut process.stdin,
+            &mut process.next_id,
             "thread/resume",
             params,
-            &app,
-            &run_id,
-            &mut state,
+            app,
+            run_id,
+            state,
         ) {
             Ok(result) => result,
             Err(error) => {
                 used_resume = false;
                 emit_codex_status(
-                    &app,
-                    &run_id,
+                    app,
+                    run_id,
                     &format!("Codex app-server resume failed; starting a fresh thread: {error}"),
                 );
+                state.failed_message = None;
                 codex_rpc_request(
-                    &mut reader,
-                    &mut stdin,
-                    &mut next_id,
+                    &mut process.reader,
+                    &mut process.stdin,
+                    &mut process.next_id,
                     "thread/start",
-                    codex_thread_params(&root_string, sandbox, model.as_deref()),
-                    &app,
-                    &run_id,
-                    &mut state,
+                    codex_thread_params(options.root_string, options.sandbox, options.model),
+                    app,
+                    run_id,
+                    state,
                 )?
             }
         }
     } else {
         codex_rpc_request(
-            &mut reader,
-            &mut stdin,
-            &mut next_id,
+            &mut process.reader,
+            &mut process.stdin,
+            &mut process.next_id,
             "thread/start",
-            codex_thread_params(&root_string, sandbox, model.as_deref()),
-            &app,
-            &run_id,
-            &mut state,
+            codex_thread_params(options.root_string, options.sandbox, options.model),
+            app,
+            run_id,
+            state,
         )?
     };
 
-    state.thread_id =
-        json_path_string(&thread_result, &["thread", "id"]).or_else(|| state.thread_id.clone());
-    let Some(thread_id) = state.thread_id.clone() else {
-        let _ = child.kill();
-        return Err("Codex app-server did not return a thread id.".into());
+    let thread_id = json_path_string(&result, &["thread", "id"])
+        .or_else(|| state.thread_id.clone())
+        .ok_or_else(|| "Codex app-server did not return a thread id.".to_string())?;
+    Ok((thread_id, used_resume))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_codex_app_server_blocking(
+    app: tauri::AppHandle,
+    server_state: CodexAppServerState,
+    workspace_path: String,
+    codex_path: String,
+    prompt: String,
+    resume_session_id: Option<String>,
+    run_id: String,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<CommandResult, String> {
+    if prompt.trim().is_empty() {
+        return Err("Prompt is empty.".into());
+    }
+
+    let root = canonical_workspace(&workspace_path)?;
+    let prompt_file = write_codex_prompt_file(&root, &prompt)?;
+    let prompt_instruction = format!(
+        "Read the full task from this workspace file and follow it exactly: {}",
+        prompt_file
+    );
+    let root_string = root.to_string_lossy().to_string();
+    let sandbox = default_codex_sandbox();
+    let model = clean_optional_cli_value(model.as_deref()).map(str::to_string);
+    let effort = clean_optional_cli_value(effort.as_deref()).map(str::to_string);
+    let workspace_key = root_string.clone();
+
+    let mut state = CodexAppServerRunState::default();
+    let mut manager = server_state
+        .0
+        .lock()
+        .map_err(|_| "Codex app-server state is unavailable.".to_string())?;
+    {
+        ensure_codex_app_server_process(&mut manager, &app, &run_id, &codex_path, &root)?;
+    }
+
+    let cached_thread = manager.threads.get(&workspace_key).map(|thread| thread.thread_id.clone());
+    let had_cached_thread = cached_thread.is_some();
+    let (mut thread_id, mut used_resume) = if let Some(thread_id) = cached_thread {
+        emit_codex_status(
+            &app,
+            &run_id,
+            &format!("Codex app-server keeping live thread {}", short_for_log(&thread_id)),
+        );
+        (thread_id, true)
+    } else {
+        let (thread_id, used_resume) = {
+            let process = manager
+                .process
+                .as_mut()
+                .ok_or_else(|| "Codex app-server process is unavailable.".to_string())?;
+            resume_or_start_codex_thread(
+                process,
+                &app,
+                &run_id,
+                CodexThreadStartOptions {
+                    root_string: &root_string,
+                    sandbox,
+                    resume_session_id: resume_session_id.as_deref(),
+                    model: model.as_deref(),
+                },
+                &mut state,
+            )?
+        };
+        manager.threads.insert(
+            workspace_key.clone(),
+            CodexWorkspaceThread {
+                thread_id: thread_id.clone(),
+                workspace_path: root_string.clone(),
+            },
+        );
+        (thread_id, used_resume)
     };
     emit_codex_status(
         &app,
@@ -686,39 +926,128 @@ fn run_codex_app_server_blocking(
         &format!("Codex app-server thread {}", short_for_log(&thread_id)),
     );
 
-    let turn_result = codex_rpc_request(
-        &mut reader,
-        &mut stdin,
-        &mut next_id,
-        "turn/start",
-        codex_turn_params(
-            &root_string,
-            &thread_id,
-            &prompt_instruction,
-            model.as_deref(),
-            effort.as_deref(),
-        ),
-        &app,
-        &run_id,
-        &mut state,
-    )?;
+    let mut turn_start_error = None;
+    {
+        let process = manager
+            .process
+            .as_mut()
+            .ok_or_else(|| "Codex app-server process is unavailable.".to_string())?;
+        match codex_rpc_request(
+            &mut process.reader,
+            &mut process.stdin,
+            &mut process.next_id,
+            "turn/start",
+            codex_turn_params(
+                &root_string,
+                &thread_id,
+                &prompt_instruction,
+                model.as_deref(),
+                effort.as_deref(),
+            ),
+            &app,
+            &run_id,
+            &mut state,
+        ) {
+            Ok(result) => {
+                state.turn_id =
+                    json_path_string(&result, &["turn", "id"]).or_else(|| state.turn_id.clone());
+            }
+            Err(error) => turn_start_error = Some(error),
+        }
+    }
+
+    if let Some(error) = turn_start_error {
+        if !had_cached_thread {
+            return Err(error);
+        }
+        emit_codex_status(
+            &app,
+            &run_id,
+            &format!("Codex live thread rejected the turn; starting fresh: {error}"),
+        );
+        manager.threads.remove(&workspace_key);
+        state = CodexAppServerRunState::default();
+        let fresh_thread_id = {
+            let process = manager
+                .process
+                .as_mut()
+                .ok_or_else(|| "Codex app-server process is unavailable.".to_string())?;
+            let (thread_id, _) = resume_or_start_codex_thread(
+                process,
+                &app,
+                &run_id,
+                CodexThreadStartOptions {
+                    root_string: &root_string,
+                    sandbox,
+                    resume_session_id: None,
+                    model: model.as_deref(),
+                },
+                &mut state,
+            )?;
+            thread_id
+        };
+        manager.threads.insert(
+            workspace_key.clone(),
+            CodexWorkspaceThread {
+                thread_id: fresh_thread_id.clone(),
+                workspace_path: root_string.clone(),
+            },
+        );
+        thread_id = fresh_thread_id;
+        used_resume = false;
+        let process = manager
+            .process
+            .as_mut()
+            .ok_or_else(|| "Codex app-server process is unavailable.".to_string())?;
+        let turn_result = codex_rpc_request(
+            &mut process.reader,
+            &mut process.stdin,
+            &mut process.next_id,
+            "turn/start",
+            codex_turn_params(
+                &root_string,
+                &thread_id,
+                &prompt_instruction,
+                model.as_deref(),
+                effort.as_deref(),
+            ),
+            &app,
+            &run_id,
+            &mut state,
+        )?;
+        state.turn_id =
+            json_path_string(&turn_result, &["turn", "id"]).or_else(|| state.turn_id.clone());
+    }
+
     state.turn_id =
-        json_path_string(&turn_result, &["turn", "id"]).or_else(|| state.turn_id.clone());
+        state.turn_id.clone().or_else(|| Some("unknown".to_string()));
 
     while !state.completed && state.failed_message.is_none() {
-        let message = codex_read_json_message(&mut reader)?;
+        let message = {
+            let process = manager
+                .process
+                .as_mut()
+                .ok_or_else(|| "Codex app-server process is unavailable.".to_string())?;
+            codex_read_json_message(&mut process.reader)
+        };
+        let message = match message {
+            Ok(message) => message,
+            Err(error) => {
+                manager.stop_process();
+                return Err(error);
+            }
+        };
         handle_codex_app_server_message(&message, &app, &run_id, &mut state);
     }
 
-    let _ = child.kill();
-    let _ = child.wait();
-    let stderr_text = stderr_buffer
-        .lock()
-        .map(|value| value.clone())
+    let stderr_text = manager
+        .process
+        .as_ref()
+        .and_then(|process| process.stderr_buffer.lock().ok().map(|value| value.clone()))
         .unwrap_or_default();
     let stdout = format!(
-        "Codex app-server thread: {}\nCodex app-server turn: {}\nEvents: {}\n\n{}",
-        state.thread_id.as_deref().unwrap_or("unknown"),
+        "Codex app-server persistent: alive\nCodex app-server thread: {}\nCodex app-server turn: {}\nEvents: {}\n\n{}",
+        thread_id,
         state.turn_id.as_deref().unwrap_or("unknown"),
         state.event_count,
         state.response_text.trim()
@@ -732,7 +1061,7 @@ fn run_codex_app_server_blocking(
             code: Some(1),
             stdout,
             stderr: format!("{error}\n{stderr_text}").trim().to_string(),
-            session_id: state.thread_id,
+            session_id: Some(thread_id),
             used_resume,
         });
     }
@@ -742,7 +1071,7 @@ fn run_codex_app_server_blocking(
         code: Some(0),
         stdout,
         stderr: stderr_text,
-        session_id: state.thread_id,
+        session_id: Some(thread_id),
         used_resume,
     })
 }
@@ -1279,6 +1608,7 @@ fn capture_console_blocking(workspace_path: String, url: String) -> Result<Conso
 fn main() {
     tauri::Builder::default()
         .manage(PreviewState(Mutex::new(None)))
+        .manage(CodexAppServerState::default())
         .invoke_handler(tauri::generate_handler![
             create_workspace,
             open_workspace,
@@ -1290,6 +1620,9 @@ fn main() {
             write_file,
             write_binary_file,
             check_codex,
+            codex_app_server_status,
+            stop_codex_app_server,
+            reset_codex_app_server_session,
             run_codex,
             run_codex_app_server,
             verify_workspace,
@@ -1709,7 +2042,7 @@ fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(
         _ => return Err("Unsupported package manager.".into()),
     };
 
-    // ponytail: install-on-preview is enough for MVP; add a dependency status UI if installs get slow.
+    // ponytail: install-on-preview remains acceptable until a dependency status UI is added.
     let output = package_command(tool)?
         .current_dir(root)
         .arg("install")

@@ -12,6 +12,8 @@ DesignForge is for local developers and product designers who want a focused des
 
 DesignForge provides the local project structure around high-quality UI generation: project-scoped chat, work history, a design brief, agent instructions, durable `DESIGN.md`, generated screen boundary, preview evidence, and logs. Success means the app turns natural-language design requests into repeatable design-quality decisions instead of one-off prompt guessing.
 
+The chat should feel like a live design agent, not a detached command summary. Codex session continuity, visible execution phases, and concrete next actions are part of the product experience.
+
 ## Brand Personality
 
 Focused, precise, serious.
@@ -28,6 +30,8 @@ Avoid generic SaaS dashboards, decorative AI gradients, oversized marketing hero
 - Prompts should preserve craft constraints, not just task text.
 - Natural-language requests should pass through explicit quality lenses: source truth, system first, content economy, visual distinctiveness, interaction realism, editability, asset integrity, and handoff.
 - Local files and local CLI execution remain explicit.
+- Codex should stay connected across iterative design turns whenever the user keeps working in the same project.
+- Chat should expose agent progress as request context, plan, execution, artifact, and verification-ready result phases.
 - The interface should feel like a working tool, not a landing page.
 
 ## Accessibility & Inclusion

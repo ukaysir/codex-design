@@ -4,7 +4,7 @@ DesignForge is a local Windows desktop workbench for a Codex-powered UI design w
 
 Heavy evidence stages are intentionally user-triggered. Verification, repair, preview, screenshot capture, console capture, critique, quality audit, handoff, and export run from explicit workbench actions so small design iterations stay fast.
 
-## Current MVP
+## Current Implementation
 
 - Tauri v2 app shell with React, TypeScript, Vite, and Tailwind CSS
 - Chat-first DesignForge workbench with request intake, preview surface, pipeline evidence, artifacts, run history, quality evidence, and export actions
@@ -25,8 +25,10 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 - Clipboard image/file paste in the chat composer through Ctrl+V, using the same attachment pipeline
 - Component-level edit flow through preview click selection or anchor-list selection with `@anchor` and `<mentioned-element>` context
 - Direct source splice for exact anchored text replacements before invoking Codex
-- Codex CLI check, `codex app-server` wrapper runner, live event stream, and `codex exec` fallback
+- Codex CLI check, persistent `codex app-server` manager, live event stream, workspace-scoped thread reuse, and `codex exec` fallback
 - Codex runtime, model, and reasoning effort controls in the pipeline panel
+- App-server connection controls for status refresh, stop, and new project session
+- Agentic chat cards that show request context, design planning, Codex execution, artifact refresh, and next actions instead of only final summaries
 - Codex prompt handoff through `.designforge/codex-prompts/latest.md` to avoid Windows command-line length failures
 - Manual generated workspace verification
 - Manual one-pass repair for failed verification
@@ -100,7 +102,9 @@ The app defaults to `codex` as the CLI path. Codex runs with:
 codex app-server
 ```
 
-DesignForge uses Codex app-server as the default runtime so the desktop app can control Codex through the local JSON-RPC protocol and receive streamed turn events such as `turn/started`, `item/agentMessage/delta`, and `turn/completed`. The pipeline panel exposes the runtime selector. Choose `app-server` for the integrated chat-like wrapper path, or `exec` to use the older blocking runner.
+DesignForge uses Codex app-server as the default runtime so the desktop app can control Codex through the local JSON-RPC protocol and receive streamed turn events such as `turn/started`, `item/agentMessage/delta`, and `turn/completed`. The backend keeps one app-server process alive across chat turns and maps each workspace to its active Codex thread. A completed turn no longer kills the app-server process; the next request in the same project reuses the live thread when possible and falls back to stored thread resume or a fresh thread only when needed.
+
+The pipeline panel exposes the runtime selector and connection controls. Choose `app-server` for the integrated persistent session path, or `exec` to use the older blocking runner. `상태 확인` refreshes the process/thread badge, `중지` stops the persistent app-server process, and `새 세션` clears the current project's thread while leaving the process available for the next request.
 
 The same panel also controls model and reasoning effort. Leave both blank to use the Codex CLI defaults, or set values such as `gpt-5.5` and `high`/`xhigh`. The app-server path sends these as `model` and `effort` turn fields; the exec fallback sends `--model` and `-c model_reasoning_effort=...`.
 
@@ -190,7 +194,7 @@ The default chat path is intentionally narrow:
 13. Refresh token/component and static-check manifests.
 14. Append a run record.
 
-Chat messages are written to `.designforge/chat.jsonl`. Tool/status work activity is written to `.designforge/activity.jsonl`. The UI shows them in separate conversation and work-log tabs.
+Chat messages are written to `.designforge/chat.jsonl`. Tool/status work activity is written to `.designforge/activity.jsonl`. Agentic chat cards also live in `.designforge/chat.jsonl` with optional metadata for run id, phase, status, thread id, details, and artifact path. The UI shows conversation and work-log records in separate tabs.
 
 The app does not automatically verify, preview, capture, critique, quality-audit, handoff, or export after every chat request.
 

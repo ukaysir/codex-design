@@ -48,6 +48,14 @@ export type CodexAppServerEvent = {
   turnId?: string | null;
 };
 
+export type CodexAppServerStatus = {
+  running: boolean;
+  pid?: number | null;
+  workspacePath?: string | null;
+  threadId?: string | null;
+  threadCount: number;
+};
+
 export type PreviewInfo = {
   url: string;
   pid: number;

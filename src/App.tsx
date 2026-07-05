@@ -41,6 +41,7 @@ import type {
   AttachmentInfo,
   CommentRecord,
   CodexAppServerEvent,
+  CodexAppServerStatus,
   CodexEffort,
   CodexRuntime,
   CommandResult,
@@ -114,7 +115,19 @@ const ARTIFACT_VIEWPORT_HEIGHT = 1080;
 const MAX_LOGS = 300;
 const LOG_PREVIEW_CHARS = 2000;
 
-type ChatKind = "chat" | "status" | "tool" | "summary";
+type ChatKind = "chat" | "status" | "tool" | "summary" | "agent" | "agent-result";
+
+type AgentChatStatus = "queued" | "active" | "done" | "error" | "info";
+
+type AgentChatMeta = {
+  runId: string;
+  phase: string;
+  title: string;
+  status: AgentChatStatus;
+  details?: string[];
+  threadId?: string | null;
+  artifactPath?: string;
+};
 
 type ChatMessage = {
   id: string;
@@ -124,6 +137,7 @@ type ChatMessage = {
   kind?: ChatKind;
   level?: LogLevel;
   attachments?: AttachmentInfo[];
+  agent?: AgentChatMeta;
 };
 
 type StepStatus = "idle" | "active" | "done" | "error";
@@ -244,6 +258,36 @@ function completedAgentText(event: CodexAppServerEvent) {
   if (!item || typeof item !== "object") return null;
   const candidate = item as { type?: unknown; text?: unknown };
   return candidate.type === "agentMessage" && typeof candidate.text === "string" ? candidate.text : null;
+}
+
+function codexStatusMessage(event: CodexAppServerEvent) {
+  if (event.method !== "designforge/status" || !event.params || typeof event.params !== "object") return null;
+  const candidate = event.params as { message?: unknown };
+  return typeof candidate.message === "string" ? candidate.message : null;
+}
+
+function codexEventLabel(method?: string) {
+  if (!method) return "Codex 연결 대기";
+  if (method === "designforge/status") return "Codex 세션 준비";
+  if (method === "thread/started") return "대화 스레드 연결";
+  if (method === "turn/started") return "작업 턴 시작";
+  if (method === "item/started") return "파일/명령 작업 시작";
+  if (method === "item/agentMessage/delta") return "응답 작성 중";
+  if (method === "item/completed") return "작업 항목 완료";
+  if (method === "turn/completed") return "작업 턴 완료";
+  if (method === "error") return "Codex 오류";
+  return method.replaceAll("/", " / ");
+}
+
+function buildAgentContent(agent: AgentChatMeta) {
+  const details = agent.details?.length ? `\n${agent.details.map((detail) => `- ${detail}`).join("\n")}` : "";
+  return `${agent.title}${details}`;
+}
+
+function agentLevel(status: AgentChatStatus): LogLevel | undefined {
+  if (status === "error") return "error";
+  if (status === "done") return "success";
+  return "info";
 }
 
 function now() {
@@ -1088,6 +1132,7 @@ export default function App() {
     text: "",
     eventCount: 0,
   });
+  const [codexServerStatus, setCodexServerStatus] = useState<CodexAppServerStatus | null>(null);
   const projectRootPath = settings.defaultProjectRootDir || DEFAULT_PROJECT_ROOT;
 
   const visibleFiles = useMemo(
@@ -1199,6 +1244,7 @@ export default function App() {
         await loadTokenManifest(workspacePath);
         await loadStaticCheck(workspacePath);
         await loadQualityAudit(workspacePath);
+        await refreshCodexServerStatus(workspacePath);
       } catch (error) {
         pushLog("error", `Could not load workspace state: ${textFromError(error)}`);
       }
@@ -1212,10 +1258,21 @@ export default function App() {
     void listen<CodexAppServerEvent>("codex-app-server-event", (event) => {
       const payload = event.payload;
       if (!isCodexAppServerEvent(payload)) return;
+      const statusMessage = codexStatusMessage(payload);
+      if (payload.threadId || statusMessage) {
+        setCodexServerStatus((current) => ({
+          running: true,
+          pid: current?.pid ?? null,
+          workspacePath: current?.workspacePath ?? null,
+          threadId: payload.threadId ?? current?.threadId ?? null,
+          threadCount: Math.max(current?.threadCount ?? 0, payload.threadId ? 1 : 0),
+        }));
+      }
       setCodexStream((current) => {
         if (current.runId && current.runId !== payload.runId) return current;
         const completedText = completedAgentText(payload);
-        const text = completedText ?? (payload.delta ? `${current.text}${payload.delta}` : current.text);
+        const statusLine = statusMessage ? `${codexEventLabel(payload.method)}: ${statusMessage}` : "";
+        const text = completedText ?? (payload.delta ? `${current.text}${payload.delta}` : statusLine || current.text);
         const status =
           payload.method === "error"
             ? "error"
@@ -1271,6 +1328,7 @@ export default function App() {
     kind: ChatKind = "chat",
     level?: LogLevel,
     attachments?: AttachmentInfo[],
+    agent?: AgentChatMeta,
   ): ChatMessage {
     return {
       id: crypto.randomUUID(),
@@ -1280,6 +1338,7 @@ export default function App() {
       kind,
       level,
       attachments: attachments?.length ? attachments : undefined,
+      agent,
     };
   }
 
@@ -1300,8 +1359,9 @@ export default function App() {
     kind: ChatKind = "chat",
     level?: LogLevel,
     attachments?: AttachmentInfo[],
+    agent?: AgentChatMeta,
   ) {
-    const message = createChatMessage(role, content, kind, level, attachments);
+    const message = createChatMessage(role, content, kind, level, attachments, agent);
     const isActivity = isActivityMessage(message);
     const relativePath = isActivity ? ACTIVITY_PATH : CHAT_PATH;
     if (isActivity) {
@@ -1325,6 +1385,11 @@ export default function App() {
       pushLog("error", `Could not persist ${isActivity ? "activity" : "chat"} message: ${textFromError(error)}`);
     }
     return message;
+  }
+
+  async function appendAgentMessage(path: string, agent: AgentChatMeta) {
+    const kind: ChatKind = agent.phase === "result" || agent.status === "error" ? "agent-result" : "agent";
+    return appendChatMessage(path, "assistant", buildAgentContent(agent), kind, agentLevel(agent.status), undefined, agent);
   }
 
   async function loadChatHistory(path: string) {
@@ -1712,6 +1777,46 @@ export default function App() {
     setCodexSession(manifest);
     pushLog("success", `${result.usedResume ? "Resumed" : "Stored"} Codex session: ${result.sessionId.slice(0, 8)}...`);
     return manifest;
+  }
+
+  async function refreshCodexServerStatus(path = workspacePath) {
+    try {
+      const status = await callTauri<CodexAppServerStatus>("codex_app_server_status", {
+        workspacePath: path || null,
+      });
+      setCodexServerStatus(status);
+      return status;
+    } catch (error) {
+      pushLog("error", `Could not read Codex app-server status: ${textFromError(error)}`);
+      setCodexServerStatus(null);
+      return null;
+    }
+  }
+
+  async function stopPersistentCodexServer() {
+    try {
+      await callTauri("stop_codex_app_server", {});
+      setCodexStream({ runId: "", status: "idle", text: "", eventCount: 0 });
+      setCodexServerStatus({ running: false, pid: null, workspacePath: null, threadId: null, threadCount: 0 });
+      pushLog("success", "Stopped persistent Codex app-server.");
+      if (workspacePath) {
+        await appendChatMessage(workspacePath, "assistant", "Codex app-server 연결을 중지했습니다. 다음 요청 때 다시 시작합니다.", "tool", "info");
+      }
+    } catch (error) {
+      pushLog("error", `Could not stop Codex app-server: ${textFromError(error)}`);
+    }
+  }
+
+  async function resetPersistentCodexSession() {
+    if (!workspacePath) return;
+    try {
+      await callTauri("reset_codex_app_server_session", { workspacePath });
+      setCodexSession(null);
+      await refreshCodexServerStatus(workspacePath);
+      await appendChatMessage(workspacePath, "assistant", "이 프로젝트의 Codex thread를 새 세션으로 초기화했습니다.", "tool", "info");
+    } catch (error) {
+      pushLog("error", `Could not reset Codex app-server session: ${textFromError(error)}`);
+    }
   }
 
   async function loadAnchorManifest(path: string) {
@@ -2467,6 +2572,7 @@ export default function App() {
     if (runtime === "app-server") {
       const runId = crypto.randomUUID();
       setCodexStream({ runId, status: "running", text: "", eventCount: 0 });
+      void refreshCodexServerStatus(path);
       try {
         result = await callTauri<CommandResult>("run_codex_app_server", { ...args, runId });
       } catch (error) {
@@ -2475,6 +2581,8 @@ export default function App() {
         );
         pushLog("error", `Codex app-server unavailable; retrying with codex exec: ${textFromError(error)}`);
         result = await callTauri<CommandResult>("run_codex", args);
+      } finally {
+        void refreshCodexServerStatus(path);
       }
     } else {
       setCodexStream({ runId: "", status: "idle", text: "", eventCount: 0 });
@@ -2482,6 +2590,7 @@ export default function App() {
     }
     pushCommandResult(label, result);
     await saveCodexSession(path, result, label);
+    await refreshCodexServerStatus(path);
     if (!result.success) throw new Error(`${label} failed.`);
     return result;
   }
@@ -3408,6 +3517,7 @@ ${effectiveRequest}`;
     const commentScreenLabel = options.screenLabel ?? "Generated Screen";
 
     const startedAt = new Date().toISOString();
+    const agentRunId = crypto.randomUUID();
     let path = "";
     let lastResult: CommandResult | null = null;
     let repairAttempts = 0;
@@ -3432,11 +3542,28 @@ ${effectiveRequest}`;
       else await loadDesignClarification(path);
       await loadQualityAudit(path);
       await appendChatMessage(path, "user", displayRequest, "chat", undefined, attachments);
-      await appendChatMessage(path, "assistant", "워크스페이스와 이전 DesignForge 대화를 연결했습니다.", "status", "info");
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "context",
+        title: "요청을 작업 컨텍스트에 연결했습니다.",
+        status: "done",
+        details: [
+          `프로젝트: ${path.split(/[\\/]/).filter(Boolean).pop() || "workspace"}`,
+          attachments.length ? `첨부 ${attachments.length}개를 함께 전달합니다.` : "첨부 없이 현재 디자인 문맥을 사용합니다.",
+          codexSession?.sessionId ? `저장된 Codex thread ${shortSessionId(codexSession.sessionId)}를 이어서 사용합니다.` : "필요하면 새 Codex thread를 시작합니다.",
+        ],
+        threadId: codexSession?.sessionId,
+      });
       setStep("context", "done");
 
       setStep("design", "active");
-      await appendChatMessage(path, "assistant", "DESIGN.md를 섹션별로 검사하고 부족한 품질 기준을 보강합니다.", "status", "info");
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "design",
+        title: "디자인 기준을 먼저 정리합니다.",
+        status: "active",
+        details: ["DESIGN.md의 품질 기준을 점검합니다.", "부족한 제품/톤/레이아웃 신호는 이번 요청 기준으로 보강합니다."],
+      });
       const designHealth = await prepareDesignSystem(path, requestForCodex);
       setStep("design", "done");
 
@@ -3445,28 +3572,62 @@ ${effectiveRequest}`;
       brief = await writeDesignBriefManifest(path, requestForCodex, designHealth, context, clarification);
       setLatestContext(context);
       setLatestBrief(brief);
-      await appendChatMessage(
-        path,
-        "assistant",
-        `Design Brief를 작성했습니다. mode=${brief.mode}, health=${brief.designSystemHealth.score}/100.`,
-        "tool",
-        "success",
-      );
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "brief",
+        title: "실행 브리프를 작성했습니다.",
+        status: "done",
+        details: [
+          `mode=${brief.mode}`,
+          `design health=${brief.designSystemHealth.score}/100`,
+          `${BRIEF_PATH}와 ${CONTEXT_PATH}에 Codex가 읽을 근거를 저장했습니다.`,
+        ],
+      });
       setStep("brief", "done");
 
       setStep("prompt", "active");
       const prompt = await writePrompt(path, requestForCodex, brief, context, clarification);
-      await appendChatMessage(path, "assistant", `${PROMPT_PATH}에 Codex 전달 프롬프트를 준비했습니다.`, "tool", "success");
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "prompt",
+        title: "Codex 실행 프롬프트를 준비했습니다.",
+        status: "done",
+        details: [`${PROMPT_PATH}에 요청, 디자인 기준, 현재 파일 문맥을 묶었습니다.`],
+      });
       setStep("prompt", "done");
 
       setStep("codex", "active");
-      await appendChatMessage(path, "assistant", "Codex CLI에 변경 요청을 전달합니다.", "status", "info");
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "codex",
+        title: codexRuntime === "app-server" ? "살아있는 Codex 세션에서 변경을 실행합니다." : "Codex exec로 변경을 실행합니다.",
+        status: "active",
+        details: [
+          `runtime=${codexRuntime}`,
+          `model=${codexModelLabel}`,
+          `effort=${codexEffortLabel}`,
+          codexServerStatus?.running ? "기존 app-server 연결이 살아있습니다." : "필요하면 app-server 연결을 시작합니다.",
+        ],
+        threadId: codexSession?.sessionId,
+      });
       const check = await callTauri<CommandResult>("check_codex", { codexPath: settings.codexPath });
       pushCommandResult("Codex check", check);
       if (!check.success) throw new Error("Codex CLI is not available.");
 
       const result = await runCodexPrompt(path, prompt, "Codex run");
       lastResult = result;
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "codex",
+        title: "Codex 변경 실행이 완료됐습니다.",
+        status: "done",
+        details: [
+          result.sessionId ? `thread=${shortSessionId(result.sessionId)} ${result.usedResume ? "유지/재사용" : "새로 시작"}` : "thread 정보 없음",
+          `events=${codexStream.eventCount || "stream"}`,
+          "파일 갱신과 앵커 재색인을 이어서 진행합니다.",
+        ],
+        threadId: result.sessionId,
+      });
       setStep("codex", "done");
 
       setStep("artifact", "active");
@@ -3499,6 +3660,19 @@ ${effectiveRequest}`;
       }
       await refreshFiles(path);
       setStep("artifact", "done");
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "artifact",
+        title: "작업 산출물을 갱신했습니다.",
+        status: "done",
+        details: [
+          `${ARTIFACT_PATH}`,
+          `${ANCHORS_PATH}: ${anchors.anchors.length} anchors`,
+          tokenManifest ? `${TOKEN_MANIFEST_PATH}: ${tokenManifest.colors.length} colors / ${tokenManifest.componentInventory.length} components` : `${TOKEN_MANIFEST_PATH}: pending`,
+          staticCheck ? `${STATIC_CHECK_PATH}: ${staticCheck.status}` : `${STATIC_CHECK_PATH}: pending`,
+        ],
+        artifactPath: ARTIFACT_PATH,
+      });
 
       const runId = crypto.randomUUID();
       await recordRun(path, {
@@ -3535,13 +3709,19 @@ ${effectiveRequest}`;
         createdAt: new Date().toISOString(),
         runId,
       });
-      await appendChatMessage(
-        path,
-        "assistant",
-        `기본 생성이 완료됐습니다. ${ARTIFACT_PATH}와 ${ANCHORS_PATH}를 갱신했고, 검증/프리뷰/캡처/크리틱/export는 오른쪽 작업 버튼에서 필요할 때 실행합니다.`,
-        "summary",
-        "success",
-      );
+      await appendAgentMessage(path, {
+        runId: agentRunId,
+        phase: "result",
+        title: "작업이 완료됐습니다.",
+        status: "done",
+        details: [
+          `${ARTIFACT_PATH}와 ${ANCHORS_PATH}를 갱신했습니다.`,
+          `Codex thread는 ${shortSessionId((lastResult ?? result).sessionId ?? codexSession?.sessionId ?? "fresh")} 상태로 보존됩니다.`,
+          "다음 액션: 검증 실행, 프리뷰 캡처, 크리틱, export 중 필요한 작업을 이어서 실행할 수 있습니다.",
+        ],
+        threadId: (lastResult ?? result).sessionId ?? codexSession?.sessionId,
+        artifactPath: ARTIFACT_PATH,
+      });
     } catch (error) {
       const message = textFromError(error);
       setSteps((current) =>
@@ -3552,7 +3732,7 @@ ${effectiveRequest}`;
         const runId = crypto.randomUUID();
         await recordRun(path, {
           id: runId,
-        request: recordRequest,
+          request: recordRequest,
           status: "error",
           startedAt,
           finishedAt: new Date().toISOString(),
@@ -3587,7 +3767,14 @@ ${effectiveRequest}`;
         });
       }
       if (path) {
-        await appendChatMessage(path, "assistant", `중단됐습니다: ${message}`, "summary", "error");
+        await appendAgentMessage(path, {
+          runId: agentRunId,
+          phase: "error",
+          title: "작업이 중단됐습니다.",
+          status: "error",
+          details: [message, "가능하면 현재 Codex 연결과 저장된 thread를 보존하고 다음 요청에서 이어갑니다."],
+          threadId: codexSession?.sessionId,
+        });
       } else {
         pushMessage("assistant", `중단됐습니다: ${message}`, "summary", "error");
       }
@@ -3774,6 +3961,9 @@ ${effectiveRequest}`;
   const codexRuntime = settings.codexRuntime || "app-server";
   const codexModelLabel = settings.codexModel.trim() || "CLI default";
   const codexEffortLabel = settings.codexEffort || "auto";
+  const codexServerRunning = codexRuntime === "app-server" && !!codexServerStatus?.running;
+  const codexServerLabel = codexServerRunning ? "connected" : codexRuntime === "app-server" ? "standby" : "exec";
+  const codexServerThreadLabel = codexServerStatus?.threadId ? shortSessionId(codexServerStatus.threadId) : codexSessionLabel;
   const visibleArtifacts = visibleFiles.length ? visibleFiles : [{ relativePath: ARTIFACT_PATH, isDirectory: false }];
   const verifyStepStatus = steps.find((step) => step.id === "verify")?.status ?? "idle";
   const qualityStepStatus = steps.find((step) => step.id === "quality")?.status ?? "idle";
@@ -4528,6 +4718,36 @@ ${effectiveRequest}`;
             ))}
           </div>
 
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-8 rounded-xl px-2 text-[10px]"
+              onClick={() => void refreshCodexServerStatus()}
+              disabled={!workspacePath}
+            >
+              상태 확인
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-8 rounded-xl px-2 text-[10px]"
+              onClick={() => void stopPersistentCodexServer()}
+              disabled={!codexServerRunning || busy}
+            >
+              중지
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-8 rounded-xl px-2 text-[10px]"
+              onClick={() => void resetPersistentCodexSession()}
+              disabled={!workspacePath || busy}
+            >
+              새 세션
+            </Button>
+          </div>
+
           <div className="mt-4 grid gap-3">
             <label className="grid gap-1 text-xs font-medium text-[var(--ink)]" htmlFor="codex-model">
               Model
@@ -4566,10 +4786,12 @@ ${effectiveRequest}`;
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs leading-5 text-[var(--muted)]">
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">session {codexSessionLabel}</span>
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">connection {codexServerLabel}</span>
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">thread {codexServerThreadLabel}</span>
             <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">model {codexModelLabel}</span>
             <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">effort {codexEffortLabel}</span>
             <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">events {codexStream.eventCount}</span>
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">threads {codexServerStatus?.threadCount ?? 0}</span>
           </div>
 
           {codexRuntime === "app-server" && (codexStream.status !== "idle" || codexStream.text) ? (
@@ -4886,6 +5108,8 @@ ${effectiveRequest}`;
 }
 
 function ChatRow({ message }: { message: ChatMessage }) {
+  if (message.agent) return <AgentChatRow message={message} agent={message.agent} />;
+
   const parsedDate = new Date(message.createdAt);
   const timestamp = Number.isNaN(parsedDate.getTime()) ? message.createdAt : parsedDate.toLocaleTimeString();
   const isUser = message.role === "user";
@@ -4926,6 +5150,68 @@ function ChatRow({ message }: { message: ChatMessage }) {
             ))}
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function agentStatusTone(status: AgentChatStatus): "lime" | "cyan" | "amber" | "danger" | "steel" {
+  if (status === "done") return "lime";
+  if (status === "active") return "cyan";
+  if (status === "error") return "danger";
+  if (status === "queued") return "amber";
+  return "steel";
+}
+
+function AgentChatRow({ message, agent }: { message: ChatMessage; agent: AgentChatMeta }) {
+  const parsedDate = new Date(message.createdAt);
+  const timestamp = Number.isNaN(parsedDate.getTime()) ? message.createdAt : parsedDate.toLocaleTimeString();
+  const isActive = agent.status === "active";
+  const isError = agent.status === "error";
+
+  return (
+    <div className="flex min-w-0 max-w-full justify-start">
+      <div
+        className={cn(
+          "w-full min-w-0 rounded-lg border bg-white px-3 py-2 text-[12px] leading-5 shadow-[0_4px_14px_rgba(31,41,55,0.03)]",
+          isError ? "border-red-200 bg-red-50 text-red-800" : "border-[var(--line)] text-[var(--charcoal)]",
+        )}
+      >
+        <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {isActive ? (
+              <Loader2 size={13} className="shrink-0 animate-spin text-[var(--primary)]" />
+            ) : isError ? (
+              <XCircle size={13} className="shrink-0 text-red-500" />
+            ) : (
+              <CheckCircle2 size={13} className="shrink-0 text-[var(--primary)]" />
+            )}
+            <span className="truncate text-[11px] font-bold text-[var(--ink-strong)]">{agent.phase}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Badge tone={agentStatusTone(agent.status)}>{agent.status}</Badge>
+            <span className="font-mono text-[9px] text-[var(--muted)]">{timestamp}</span>
+          </div>
+        </div>
+        <p className="whitespace-pre-wrap break-words text-[12px] font-semibold leading-5 text-[var(--ink)] [overflow-wrap:anywhere]">
+          {agent.title}
+        </p>
+        {agent.details?.length ? (
+          <ul className="mt-1.5 grid gap-1 text-[11px] leading-4 text-[var(--muted)]">
+            {agent.details.map((detail, index) => (
+              <li key={`${agent.runId}-${agent.phase}-${index}`} className="flex min-w-0 gap-1.5">
+                <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[var(--primary)]" />
+                <span className="min-w-0 break-words [overflow-wrap:anywhere]">{detail}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {(agent.threadId || agent.artifactPath) && (
+          <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-[10px] text-[var(--muted)]">
+            {agent.threadId ? <span className="truncate rounded-md bg-[var(--panel-2)] px-2 py-1 font-mono">thread {shortSessionId(agent.threadId)}</span> : null}
+            {agent.artifactPath ? <span className="truncate rounded-md bg-[var(--panel-2)] px-2 py-1 font-mono">{agent.artifactPath}</span> : null}
+          </div>
+        )}
       </div>
     </div>
   );

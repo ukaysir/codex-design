@@ -336,7 +336,7 @@ Internal:
 
 ## Implementation Phases
 
-### Phase 1 - Chat-First MVP
+### Phase 1 - Chat-First Foundation
 
 Status: implemented.
 
@@ -419,7 +419,7 @@ Status: implemented.
 
 ### Phase 7 - Export And Handoff
 
-Status: implemented for MVP as a manual action.
+Status: implemented as a manual action.
 
 - Export selected files as zip.
 - Reveal exported zip from the recent run list.
@@ -445,6 +445,20 @@ Status: implemented.
 - Re-read `claude-design.md` by workflow, output discipline, questions, anchors, content, frontend design, interaction/prototype, design-system creation, verification/handoff, and source/copyright lenses.
 - Encode the resulting 10 quality lenses in prompt compilation, preflight questions, `DESIGN.md` seed generation, design-system health inspection, starter workspace instructions, and manual quality audit.
 - Require broad design changes to record concrete decisions in `DESIGN.md` before coding.
+
+### Phase 10 - Agentic Chat And Persistent Codex Sessions
+
+Status: implemented.
+
+- Keep a persistent backend `codex app-server` process instead of spawning and killing one process per chat request.
+- Initialize app-server once per process and reuse the JSON-RPC connection for later turns.
+- Track workspace-scoped Codex thread ids in the Tauri app-server manager.
+- Reuse the live thread for the same project when possible, resume the stored thread when opening an existing project, and create a fresh thread only after reset or failed resume.
+- Add app-server status, stop, and project-session reset commands.
+- Surface connection, thread, event, model, and effort state in the Codex wrapper panel.
+- Store agentic chat cards with optional phase/status/thread/artifact metadata in `.designforge/chat.jsonl`.
+- Show request context, design-system preparation, prompt compilation, Codex execution, artifact indexing, and next actions as compact chat timeline cards.
+- Preserve raw tool/status activity in `.designforge/activity.jsonl` so the chat stays conversational while still retaining evidence.
 
 ## Verification Snapshot
 
