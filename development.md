@@ -145,7 +145,7 @@ This makes the design system automatic without asking the user to fill a form.
 
 ## Backend Commands
 
-Current commands are enough for the chat-first loop:
+Current commands cover the verified chat-first loop:
 
 - `create_workspace`
 - `open_workspace`
@@ -154,8 +154,15 @@ Current commands are enough for the chat-first loop:
 - `write_file`
 - `check_codex`
 - `run_codex`
+- `verify_workspace`
+- `start_preview`
+- `stop_preview`
+- `capture_screenshot`
+- `capture_console`
+- `export_handoff`
+- `reveal_path`
 
-Backend work:
+Backend behavior implemented:
 
 - append run records to `.designforge/runs.jsonl`
 - append chat feedback records to `.designforge/comments.jsonl`
@@ -167,8 +174,9 @@ Backend work:
 - capture browser console evidence
 - write and run critique prompt/manifest from screenshot and console evidence
 - roll back critique edits if post-critique verification fails
-- export zip
+- export handoff zip with native Rust zip packaging
 - create handoff bundle
+- fall back from Codex `workspace-write` to `danger-full-access` only when the Windows sandbox cannot launch child processes
 
 Do not add a generic shell runner.
 
@@ -236,7 +244,7 @@ Status: implemented.
 
 ### Phase 3 - Preview Loop
 
-Status: partially implemented.
+Status: implemented for MVP.
 
 - Start workspace Vite server.
 - Show generated screen preview.
@@ -253,7 +261,7 @@ Status: partially implemented.
 
 ### Phase 4 - Feedback Loop
 
-- Status: partially implemented.
+Status: partially implemented.
 
 - Add user notes attached to artifact path. Chat-level feedback records are implemented.
 - Store `@anchor-name` references when chat feedback targets an element.
@@ -264,13 +272,49 @@ Status: partially implemented.
 
 ### Phase 5 - Export And Handoff
 
-- Status: partially implemented.
+Status: implemented for MVP.
 
-- Export selected files as zip. Basic handoff zip export is implemented.
+- Export selected files as zip. Native backend handoff zip export is implemented.
 - Reveal exported zip from the recent run list.
 - Export screenshot, console, and critique files.
 - Generate handoff README with screens, layout, interactions, tokens, assets, and files. Basic README generation is implemented.
 - Later add standalone HTML, PDF, and PPTX support.
+
+## Verification Snapshot
+
+Verified on Windows after dependency installation and Tauri resource repair:
+
+- `npm run typecheck` passes.
+- `cargo check --manifest-path src-tauri/Cargo.toml` passes.
+- `npm run tauri -- build` produces `src-tauri/target/release/designforge.exe`.
+- NSIS packaging produces `src-tauri/target/release/bundle/nsis/DesignForge_0.1.0_x64-setup.exe`.
+- A real chat run completed successfully with preview, screenshot, console capture, critique, handoff README, and handoff zip.
+- Latest successful workspace run recorded `consoleErrorCount: 0`, `consoleWarningCount: 0`, `anchorCount: 2`, and `critiqueStatus: applied`.
+
+## Next Plan
+
+1. Environment health panel
+   - Show Node/npm, Rust/Cargo, Visual Studio Build Tools, WebView2, browser capture, and Codex CLI availability.
+   - Detect stale PATH/session issues and suggest exact recovery commands.
+   - Show workspace dependency status before a chat run starts.
+
+2. Run diagnostics and failure UX
+   - Surface Codex sandbox fallback in the run record and UI.
+   - Distinguish dependency install failure, Codex CLI failure, verification failure, preview failure, screenshot failure, console failure, critique rollback, and export failure.
+   - Add a retry action for failed stages where the previous artifacts are still valid.
+
+3. Export expansion
+   - Add standalone HTML export from the generated workspace.
+   - Keep PDF/PPTX as later formats after standalone HTML is reliable.
+   - Include a machine-readable export manifest beside the zip.
+
+4. Settings surface
+   - Add UI controls for workspace path, Codex path, package manager, and browser path.
+   - Persist these settings in local storage and mirror workspace-scoped settings where appropriate.
+
+5. Screenshot and critique evidence
+   - Add richer screenshot metadata: viewport size, browser path, capture duration, image dimensions, and file size.
+   - Add console summary metadata to `.designforge/critique.json` and handoff README.
 
 ## Non-Goals
 

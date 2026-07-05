@@ -27,6 +27,9 @@ DesignForge is a local Windows desktop scaffold for a Codex-powered UI generatio
 - Handoff zip export at `outputs/exports/designforge-handoff.zip`
 - Recent run action to reveal exported handoff zip in Explorer
 - Settings persisted in local storage
+- Windows app icon resources generated under `src-tauri/icons`
+- Native Tauri backend zip export, without PowerShell archive dependency
+- Windows Codex sandbox fallback when `workspace-write` process launch fails
 
 ## Install
 
@@ -41,6 +44,23 @@ cargo --version
 ```
 
 If Cargo is missing, install Rust from rustup before running Tauri commands. If `cargo check` cannot find `link.exe` or `msvcrt.lib`, repair/install the Visual Studio Build Tools VC++ workload from an elevated installer.
+
+## Verified Locally
+
+The current Windows environment has completed:
+
+```powershell
+npm run typecheck
+cargo check --manifest-path src-tauri/Cargo.toml
+npm run tauri -- build
+```
+
+Verified generated outputs:
+
+- Desktop executable: `src-tauri/target/release/designforge.exe`
+- Windows installer: `src-tauri/target/release/bundle/nsis/DesignForge_0.1.0_x64-setup.exe`
+- Successful end-to-end workspace run in `.designforge/runs.jsonl`
+- Handoff zip: `designforge-workspace/outputs/exports/designforge-handoff.zip`
 
 ## Run
 
@@ -79,7 +99,7 @@ codex --version
 The app defaults to `codex` as the CLI path. Codex runs with:
 
 ```txt
-codex exec -C <workspace> --sandbox workspace-write --ask-for-approval never --skip-git-repo-check
+codex exec -C <workspace> --sandbox workspace-write --skip-git-repo-check
 ```
 
 ## Workspace
@@ -130,14 +150,17 @@ Existing files are not overwritten.
 - Screenshot-driven critique runs only when screenshot capture succeeds; otherwise the app records a no-screenshot critique manifest.
 - Element-level feedback uses `@anchor-name` references from `.designforge/anchors.json`.
 - Preview process, HTTP status, screenshot evidence, and console evidence are recorded.
-- Handoff export uses Windows PowerShell `Compress-Archive`.
+- Handoff export is packaged directly by the Tauri backend.
 - Screenshot capture requires Microsoft Edge or Chrome headless CLI.
 - Console capture requires Microsoft Edge or Chrome headless CLI.
 - Codex output is captured after completion, not streamed.
-- File commands are workspace-scoped, but stronger process sandboxing still belongs in a later pass.
-- Frontend typecheck/build is verified. Rust/Cargo is installed here, but full Tauri `cargo check` is blocked until the local Visual Studio Build Tools install provides the missing VC runtime library.
+- File commands are workspace-scoped. Codex falls back to `danger-full-access` only when the Windows `workspace-write` sandbox fails to launch child processes.
+- Frontend typecheck/build, Rust `cargo check`, Tauri release build, and NSIS packaging are verified locally.
 
 ## Next Steps
 
-1. Add richer screenshot inspection metadata when Codex CLI exposes it directly.
-2. Add richer export formats.
+1. Add an environment health panel for Node, npm, Rust, WebView2, Codex CLI, browser capture, and workspace dependency status.
+2. Add richer run diagnostics for Codex sandbox fallback, repair attempts, critique pass, screenshot capture, console capture, and export verification.
+3. Add richer screenshot inspection metadata when Codex CLI exposes it directly.
+4. Add richer export formats: standalone HTML first, then PDF/PPTX if needed.
+5. Add settings UI for workspace path, Codex path, package manager, and browser capture options.

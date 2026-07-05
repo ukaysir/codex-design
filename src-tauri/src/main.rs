@@ -3,6 +3,7 @@
 use serde::Serialize;
 use std::{
     env, fs,
+    io::{Seek, Write},
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
@@ -128,6 +129,31 @@ fn run_codex(
 
     let root = canonical_workspace(&workspace_path)?;
     // TODO: add streaming output and a stricter process policy before broad automation.
+    let result = run_codex_with_sandbox(&root, &codex_path, &prompt, "workspace-write")?;
+    if should_retry_codex_without_windows_sandbox(&result) {
+        let fallback = run_codex_with_sandbox(&root, &codex_path, &prompt, "danger-full-access")?;
+        return Ok(CommandResult {
+            success: fallback.success,
+            code: fallback.code,
+            stdout: format!(
+                "workspace-write sandbox failed on Windows; retried with danger-full-access.\n\n{}",
+                fallback.stdout
+            ),
+            stderr: format!(
+                "{}\n\nworkspace-write sandbox stderr:\n{}",
+                fallback.stderr, result.stderr
+            ),
+        });
+    }
+    Ok(result)
+}
+
+fn run_codex_with_sandbox(
+    root: &Path,
+    codex_path: &str,
+    prompt: &str,
+    sandbox: &str,
+) -> Result<CommandResult, String> {
     let mut command = Command::new(tool_path(&codex_path));
     command
         .current_dir(&root)
@@ -135,14 +161,22 @@ fn run_codex(
         .arg("-C")
         .arg(&root)
         .arg("--sandbox")
-        .arg("workspace-write")
-        .arg("--ask-for-approval")
-        .arg("never")
+        .arg(sandbox)
         .arg("--skip-git-repo-check")
         .arg("--color")
         .arg("never")
         .arg(prompt);
     run_command(&mut command)
+}
+
+fn should_retry_codex_without_windows_sandbox(result: &CommandResult) -> bool {
+    if result.success || !cfg!(windows) {
+        return false;
+    }
+    let output = format!("{}\n{}", result.stdout, result.stderr);
+    output.contains("CreateProcessAsUserW failed: 5")
+        || output.contains("windows sandbox")
+        || output.contains("sandbox launch issue")
 }
 
 #[tauri::command]
@@ -263,26 +297,10 @@ fn export_handoff(workspace_path: String) -> Result<ExportInfo, String> {
             .map_err(|error| format!("Could not replace existing export: {error}"))?;
     }
 
-    let script = format!(
-        "Compress-Archive -Path '{}' -DestinationPath '{}' -Force",
-        ps_escape(&stage.join("*").to_string_lossy()),
-        ps_escape(&zip_path.to_string_lossy())
-    );
-    let result = run_command(
-        Command::new("powershell")
-            .arg("-NoProfile")
-            .arg("-Command")
-            .arg(script),
-    )?;
-    if !result.success {
-        return Err(format!(
-            "Could not create handoff zip:\n{}{}",
-            result.stdout, result.stderr
-        ));
-    }
+    create_zip_from_directory(&stage, &zip_path)?;
 
     Ok(ExportInfo {
-        path: zip_path.to_string_lossy().to_string(),
+        path: shell_path(&zip_path),
     })
 }
 
@@ -629,7 +647,7 @@ fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(
     };
 
     // ponytail: install-on-preview is enough for MVP; add a dependency status UI if installs get slow.
-    let output = Command::new(package_tool(tool))
+    let output = package_command(tool)
         .current_dir(root)
         .arg("install")
         .output()
@@ -646,12 +664,34 @@ fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(
     }
 }
 
+fn package_command(tool: &str) -> Command {
+    if cfg!(windows) && tool == "npm" {
+        if let Some(cli) = npm_cli_path() {
+            let mut command = Command::new("node");
+            command.arg(cli);
+            return command;
+        }
+    }
+    Command::new(package_tool(tool))
+}
+
 fn package_tool(tool: &str) -> String {
     if cfg!(windows) && tool != "bun" {
         format!("{tool}.cmd")
     } else {
         tool.to_string()
     }
+}
+
+fn npm_cli_path() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(root) = env::var_os("ProgramFiles") {
+        candidates.push(PathBuf::from(root).join("nodejs/node_modules/npm/bin/npm-cli.js"));
+    }
+    if let Some(root) = env::var_os("ProgramFiles(x86)") {
+        candidates.push(PathBuf::from(root).join("nodejs/node_modules/npm/bin/npm-cli.js"));
+    }
+    candidates.into_iter().find(|candidate| candidate.exists())
 }
 
 fn create_default_files(root: &Path) -> Result<(), String> {
@@ -745,8 +785,60 @@ fn copy_if_exists(root: &Path, stage: &Path, relative_path: &str) -> Result<(), 
     Ok(())
 }
 
-fn ps_escape(value: &str) -> String {
-    value.replace('\'', "''")
+fn create_zip_from_directory(source_dir: &Path, zip_path: &Path) -> Result<(), String> {
+    let file = fs::File::create(zip_path)
+        .map_err(|error| format!("Could not create handoff zip: {error}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    add_directory_to_zip(&mut zip, source_dir, source_dir, options)?;
+    zip.finish()
+        .map_err(|error| format!("Could not finish handoff zip: {error}"))?;
+    Ok(())
+}
+
+fn add_directory_to_zip<W: Write + Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    base_dir: &Path,
+    dir: &Path,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    for entry in
+        fs::read_dir(dir).map_err(|error| format!("Could not read export folder: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Could not read export entry: {error}"))?;
+        let path = entry.path();
+        let name = zip_entry_name(base_dir, &path)?;
+        if path.is_dir() {
+            zip.add_directory(format!("{name}/"), options)
+                .map_err(|error| format!("Could not add export folder to zip: {error}"))?;
+            add_directory_to_zip(zip, base_dir, &path, options)?;
+        } else {
+            zip.start_file(name, options)
+                .map_err(|error| format!("Could not add export file to zip: {error}"))?;
+            let mut file = fs::File::open(&path)
+                .map_err(|error| format!("Could not read export file for zip: {error}"))?;
+            std::io::copy(&mut file, zip)
+                .map_err(|error| format!("Could not write export file to zip: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn zip_entry_name(base_dir: &Path, path: &Path) -> Result<String, String> {
+    let relative = path
+        .strip_prefix(base_dir)
+        .map_err(|_| "Export path is outside the staging folder.".to_string())?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn shell_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if cfg!(windows) {
+        value.strip_prefix(r"\\?\").unwrap_or(&value).to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn target_path(url: &str) -> String {
