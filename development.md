@@ -2,7 +2,7 @@
 
 `claude-design.md` is the primary product behavior reference. This file is the implementation log for translating that behavior into a Codex + React/Tailwind + Tauri app.
 
-The app must not expose or quote the source prompt. It should translate the behavior into product structure: understand intent, inspect context, create or refine a design system, generate one clear artifact by default, support targeted edits, and provide optional verification and handoff evidence.
+The app must not expose or quote the source prompt. It should translate the behavior into product structure: understand intent, inspect context, run an AI preflight when design context is missing, create or refine a design system, generate one clear artifact by default, support targeted edits, and provide optional verification and handoff evidence.
 
 ## Core Product Decision
 
@@ -15,19 +15,22 @@ The default chat path is light and design-focused:
 1. Create or open a local workspace.
 2. Inspect existing files, assets, styles, generated artifact, and anchors.
 3. Inspect `DESIGN.md` health.
-4. Seed or repair `DESIGN.md` only when it is missing, placeholder, thin, or structurally incomplete.
-5. Write `.designforge/context.json`.
-6. Write `.designforge/brief.json`.
-7. Compile a structured prompt with the design brief, context manifest, design system, generation mode, selected element context, and recent feedback.
-8. Save the prompt to `prompts/latest.md`.
-9. Run Codex CLI in the workspace.
-10. Generate or update `src/generated/Screen.tsx`.
-11. Refresh workspace files and generated artifact metadata.
-12. Index `data-comment-anchor` values into `.designforge/anchors.json`.
-13. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
-14. Append a run record to `.designforge/runs.jsonl`.
+4. Write `.designforge/context.json`.
+5. Run a Codex preflight prompt that reads the request, `DESIGN.md`, local context, existing artifact, assets, and recent feedback.
+6. Write `.designforge/clarification.json` with AI-generated interpretation, confidence, known context, missing context, and tailored questions.
+7. If the preflight says questions are needed, show those questions and wait for the user's answer.
+8. Seed or repair `DESIGN.md` only when it is missing, placeholder, thin, or structurally incomplete.
+9. Write `.designforge/brief.json`.
+10. Compile a structured prompt with clarification evidence, the design brief, context manifest, design system, generation mode, selected element context, and recent feedback.
+11. Save the prompt to `prompts/latest.md`.
+12. Run Codex CLI in the workspace.
+13. Generate or update `src/generated/Screen.tsx`.
+14. Refresh workspace files and generated artifact metadata.
+15. Index `data-comment-anchor` values into `.designforge/anchors.json`.
+16. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
+17. Append a run record to `.designforge/runs.jsonl`.
 
-Guided mode is the default conversation path. DesignForge asks a small set of design questions first, waits for the user's answer, then bundles the original request and answer into the generation prompt. If context is still missing after that, the agent records practical assumptions in `DESIGN.md` and proceeds.
+Guided mode is the default conversation path. DesignForge does not use hardcoded questions. It runs an AI preflight after reading local context, then asks the questions produced by that preflight. If context is still missing after the user's answer, the agent records practical assumptions in `DESIGN.md` and proceeds.
 
 Verification, repair, preview, screenshot capture, console capture, critique, quality audit, handoff, and export are manual workbench actions. They are not part of every default generation because small design iterations should not pay the full evidence cost.
 
@@ -57,7 +60,7 @@ DesignForge implements those ideas as app structure, not as visible navigation.
 - `data-comment-anchor` and `data-screen-label` remain mandatory continuity primitives.
 - "Small targeted change" becomes an anchored request mode that edits the selected semantic region and preserves unrelated layout, spacing, typography, colors, copy, and anchors.
 - "Create/update design system first" becomes persistent `DESIGN.md`; the prompt treats it as the continuing source of truth.
-- "Ask questions when needed" becomes guided mode: ask the user first, then produce an artifact and record remaining assumptions or unresolved questions in the brief and `DESIGN.md`.
+- "Ask questions when needed" becomes guided mode: read files and context first, run AI preflight, ask tailored questions, then produce an artifact and record remaining assumptions or unresolved questions in the brief and `DESIGN.md`.
 - "Explore alternatives" becomes variation mode: produce three comparable directions in one artifact with stable variation anchors.
 - "Quality review" becomes a manual quality-audit pass with a score, findings, changes, and risks.
 
@@ -73,6 +76,7 @@ The app now has:
 - Artifact list
 - Verification evidence
 - Brief/context/system-health evidence
+- Clarification/preflight evidence
 - Quality audit evidence
 - Run history and export actions
 - System log
@@ -99,6 +103,7 @@ designforge-workspace/
   assets/
   artifacts/
   prompts/
+    clarification-latest.md
     latest.md
     repair-latest.md
     critique-latest.md
@@ -112,6 +117,7 @@ designforge-workspace/
   .designforge/
     artifacts.json
     anchors.json
+    clarification.json
     brief.json
     comments.jsonl
     context.json
@@ -146,7 +152,7 @@ The prompt compiler should always produce a deterministic prompt with:
 
 - workspace role
 - instruction to read `AGENTS.md`, `CODEX_DESIGN.md`, and `DESIGN.md`
-- instruction to read `.designforge/brief.json` and `.designforge/context.json` when present
+- instruction to read `.designforge/clarification.json`, `.designforge/brief.json`, and `.designforge/context.json` when present
 - instruction not to block on questions
 - instruction to record assumptions and unresolved questions in `DESIGN.md`
 - exact artifact path
@@ -172,6 +178,15 @@ The design-system health gate should reward evidence of purpose, audience, visua
 
 ## Design Brief And Context
 
+`.designforge/clarification.json` is written before the design brief. It is the record of the AI preflight pass:
+
+- interpreted product/surface/audience/goal
+- known context from files and prior feedback
+- missing context that materially changes the design system
+- tailored questions with the reason each answer matters
+- confidence and skip/ask decision
+- design-system focus areas to lock after the user's answer
+
 `.designforge/context.json` records the local evidence available to the next Codex run:
 
 - asset files
@@ -187,6 +202,7 @@ The design-system health gate should reward evidence of purpose, audience, visua
 - audience and purpose assumptions
 - generation mode
 - design-system health
+- clarification path and unresolved question evidence
 - local context summary
 - quality bar
 - unresolved questions to carry forward without blocking
@@ -203,6 +219,7 @@ The audit must inspect:
 - `AGENTS.md`
 - `DESIGN.md`
 - `.designforge/brief.json`
+- `.designforge/clarification.json`
 - `.designforge/context.json`
 - generated artifact
 - styles/config
@@ -241,7 +258,9 @@ Backend behavior implemented:
 - capture browser console evidence on request
 - export handoff zip with native Rust zip packaging
 - create handoff bundle
-- fall back from Codex `workspace-write` to `danger-full-access` only when the Windows sandbox cannot launch child processes
+- start Codex with `danger-full-access` on Windows and force PowerShell 7 through `windows.shell_path` when available, while keeping `workspace-write` as the default on other platforms
+- reset chat, run history, design manifests, `DESIGN.md`, generated screen, and generated styles when the user starts a new design system
+- pass Codex only a short file-read instruction while storing the full prompt in `.designforge/codex-prompts/latest.md` to avoid Windows command-line length failures
 - skip heavy workspace directories such as `.git`, `node_modules`, `target`, and `dist` during file indexing
 - run long Codex, verification, screenshot, console, and export work through blocking worker tasks instead of holding the Tauri command thread
 
@@ -257,6 +276,7 @@ Visible:
 - Pipeline status
 - Artifacts
 - Design brief/context/system health
+- Clarification evidence
 - Verification evidence
 - Quality evidence
 - Run history
@@ -268,6 +288,7 @@ Internal:
 - workspace manager
 - prompt compiler
 - design-system health gate
+- AI preflight clarification writer
 - design brief writer
 - context manifest writer
 - Codex runner
@@ -297,6 +318,8 @@ Status: implemented.
 - Add single chat workspace.
 - Auto-open/create workspace.
 - Auto-inspect local context.
+- Auto-run Codex preflight for tailored questions.
+- Auto-write `.designforge/clarification.json`.
 - Auto-seed or repair thin `DESIGN.md`.
 - Auto-write `.designforge/context.json`.
 - Auto-write `.designforge/brief.json`.
@@ -311,7 +334,7 @@ Status: implemented.
 Status: implemented.
 
 - Write each chat run to `.designforge/runs.jsonl`.
-- Include request, prompt path, artifact path, brief path, context path, status, timestamps, stdout/stderr summary.
+- Include request, prompt path, artifact path, clarification path, brief path, context path, status, timestamps, stdout/stderr summary.
 - Show the latest few runs in the side panel.
 
 ### Phase 3 - Preview And Verification Loop
@@ -360,6 +383,7 @@ Status: implemented for anchored component feedback.
 Status: implemented.
 
 - Add generation modes: guided and variations.
+- Add AI preflight clarification manifest.
 - Add `DESIGN.md` health inspection.
 - Add design brief manifest.
 - Add context manifest.
@@ -373,7 +397,7 @@ Status: implemented for MVP as a manual action.
 
 - Export selected files as zip.
 - Reveal exported zip from the recent run list.
-- Export screenshot, console, critique, brief, context, and quality audit files when present.
+- Export screenshot, console, critique, clarification, brief, context, and quality audit files when present.
 - Generate handoff README with request, artifact, design-system evidence, verification, preview, screenshot, console, critique, quality audit, assets, and files.
 - Later add standalone HTML, PDF, and PPTX support.
 
@@ -424,7 +448,7 @@ Expected release outputs:
 
 - Do not clone Claude Design's private runtime.
 - Do not expose `claude-design.md` verbatim.
-- Do not ask the user to configure design-system fields before generation.
+- Do not force the user through static design-system configuration fields before generation; use AI preflight questions only when context requires them.
 - Do not keep the old multi-page navigation.
 - Do not add Monaco until textarea/file editing is actually needed again.
 - Do not build export formats before preview works.

@@ -114,6 +114,41 @@ export type DesignBriefManifest = {
   assumptions: string[];
   designSystemHealth: DesignSystemHealth;
   contextPath: string;
+  clarificationPath?: string;
+};
+
+export type ClarificationQuestion = {
+  id: string;
+  question: string;
+  why: string;
+  kind: "audience" | "brand" | "content" | "visual-direction" | "interaction" | "constraint" | "variation" | "asset" | "other";
+  required: boolean;
+};
+
+export type DesignClarificationManifest = {
+  status: "ready" | "skipped" | "failed";
+  updatedAt: string;
+  request: string;
+  mode: GenerationMode;
+  promptPath: string;
+  manifestPath: string;
+  shouldAskQuestions: boolean;
+  confidence: number;
+  requestType: "targeted-edit" | "system-revision" | "fresh-design" | "unknown";
+  interpretation: {
+    product: string;
+    userGoal: string;
+    targetSurface: string;
+    likelyAudience: string;
+    requestedFidelity: string;
+    designSystemNeed: string;
+  };
+  knownContext: string[];
+  missingContext: string[];
+  questions: ClarificationQuestion[];
+  assumptionsIfSkipped: string[];
+  designSystemFocus: string[];
+  error?: string;
 };
 
 export type QualityAuditManifest = {
@@ -148,6 +183,7 @@ export type RunRecord = {
   anchorCount?: number;
   briefPath?: string;
   contextPath?: string;
+  clarificationPath?: string;
   critiqueStatus?: CritiqueManifest["status"];
   critiquePromptPath?: string;
   critiqueManifestPath?: string;

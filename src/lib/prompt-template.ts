@@ -1,4 +1,4 @@
-import type { GenerationMode } from "../types";
+import type { DesignClarificationManifest, GenerationMode } from "../types";
 
 export type PromptOptions = {
   artifactPath?: string;
@@ -8,8 +8,10 @@ export type PromptOptions = {
   briefPath?: string;
   contextPath?: string;
   qualityAuditPath?: string;
+  clarificationPath?: string;
   briefContext?: string;
   contextSummary?: string;
+  clarificationContext?: string;
   generationMode?: GenerationMode;
 };
 
@@ -42,6 +44,7 @@ export function buildStructuredPrompt(userRequest: string, options: PromptOption
   const designSystemPath = options.designSystemPath ?? "DESIGN.md";
   const briefPath = options.briefPath ?? ".designforge/brief.json";
   const contextPath = options.contextPath ?? ".designforge/context.json";
+  const clarificationPath = options.clarificationPath ?? ".designforge/clarification.json";
   const generationMode = options.generationMode ?? "guided";
 
   return `You are working inside a DesignForge workspace.
@@ -56,14 +59,18 @@ Required reading before edits:
 3. ${designSystemPath}
 4. ${briefPath}
 5. ${contextPath}
-6. ${artifactPath}
-7. Any local assets, styles, or source files directly relevant to the request
+6. ${clarificationPath}
+7. ${artifactPath}
+8. Any local assets, styles, or source files directly relevant to the request
 
 Design brief:
 ${options.briefContext?.trim() || "(brief manifest unavailable)"}
 
 Context manifest:
 ${options.contextSummary?.trim() || "(context manifest unavailable)"}
+
+Clarification analysis:
+${options.clarificationContext?.trim() || "(clarification analysis unavailable)"}
 
 Autonomous workflow:
 1. Understand the request and infer missing context without asking the user.
@@ -99,10 +106,78 @@ Output contract:
 - Existing data-comment-anchor attributes are preserved.
 - Targeted edits modify only the selected anchor's semantic region unless the request explicitly broadens scope.
 - Follow the current component inventory and visual system before introducing a new pattern.
-- Use ${briefPath} and ${contextPath} as quality evidence, not as user-visible copy.
+- Use ${briefPath}, ${contextPath}, and ${clarificationPath} as quality evidence, not as user-visible copy.
 - No filler copy, fake stats, or generic AI SaaS composition.
 - No unrelated shell, dependency, or app-scaffold changes.
 - Prefer a strong, finished first screen over scattered partial files.`;
+}
+
+export function buildDesignClarificationPrompt(
+  userRequest: string,
+  options: PromptOptions & {
+    mode?: GenerationMode;
+    designSystemHealth?: unknown;
+    designSystemExcerpt?: string;
+    recentFeedback?: string;
+  } = {},
+) {
+  const artifactPath = options.artifactPath ?? "src/generated/Screen.tsx";
+  const designSystemPath = options.designSystemPath ?? "DESIGN.md";
+  const contextPath = options.contextPath ?? ".designforge/context.json";
+  const clarificationPath = options.clarificationPath ?? ".designforge/clarification.json";
+  const mode = options.mode ?? options.generationMode ?? "guided";
+
+  return `You are DesignForge's preflight design strategist.
+
+Your job is NOT to generate UI yet. Your job is to read the request and local design evidence, understand what the user is really asking for, then decide whether DesignForge should ask focused questions before building.
+
+Priority:
+- Follow claude-design.md behavior: understand user needs, inspect context first, ask questions for new or ambiguous work, skip questions for small tweaks or when enough information exists.
+- Questions must be specific to this request and the current design system. Do not use generic reusable questions.
+- Ask about the design system only after interpreting the product/surface/audience/constraints.
+- If the user asked for variations, ask what the variations should explore unless the request already says it.
+- Do not edit ${artifactPath}, ${designSystemPath}, src/styles.css, package files, or app shell files.
+- Write only ${clarificationPath} as JSON. No markdown files. No prose-only answer.
+
+Read before deciding:
+1. AGENTS.md
+2. CODEX_DESIGN.md
+3. ${designSystemPath}
+4. ${contextPath}
+5. ${artifactPath} if present
+6. Relevant local assets/style files listed in ${contextPath}
+
+Generation mode requested by user: ${mode}
+
+User request:
+${userRequest.trim() || "Create a focused frontend screen."}
+
+Design-system health from host inspection:
+${JSON.stringify(options.designSystemHealth ?? null, null, 2)}
+
+Design-system excerpt:
+${trimForPrompt(options.designSystemExcerpt ?? "")}
+
+Context manifest summary:
+${options.contextSummary?.trim() || "(context manifest unavailable)"}
+
+Recent feedback:
+${options.recentFeedback?.trim() || "(none)"}
+
+Decision rules:
+- For small targeted edits, set shouldAskQuestions=false unless the selected element/source is unclear.
+- For new screens, redesigns, vague product requests, unclear audience, missing brand/design-system direction, missing assets, or variation requests, set shouldAskQuestions=true.
+- Ask 4-8 questions when needed. More is okay only if the request is broad and under-specified.
+- Every question must include a reason in "why" showing how the answer changes design decisions.
+- Prefer concrete design-system questions: audience, brand/source of truth, visual direction, content proof, interaction states, assets, density, variation axis, constraints.
+- Do not ask questions whose answers are already clear from the request, DESIGN.md, or context manifest.
+- If enough context exists, explain the assumptions in assumptionsIfSkipped.
+
+Write ${clarificationPath} as valid JSON matching this TypeScript shape:
+${clarificationSchema()}
+
+Use stable kebab-case ids for questions. The "confidence" number is 0-100.
+`;
 }
 
 export function buildDesignSystemSeed(userRequest: string) {
@@ -342,6 +417,42 @@ Output contract:
 - List changed files.
 - State whether screenshot evidence was available.
 - Note any remaining visual risks.`;
+}
+
+function clarificationSchema() {
+  const example: DesignClarificationManifest = {
+    status: "ready",
+    updatedAt: "ISO-8601 timestamp",
+    request: "original user request",
+    mode: "guided",
+    promptPath: "prompts/clarification-latest.md",
+    manifestPath: ".designforge/clarification.json",
+    shouldAskQuestions: true,
+    confidence: 72,
+    requestType: "fresh-design",
+    interpretation: {
+      product: "what product or brand is being designed",
+      userGoal: "what the user wants to accomplish",
+      targetSurface: "landing page, dashboard, component, flow, etc.",
+      likelyAudience: "who will use or evaluate it",
+      requestedFidelity: "rough/wireframe/high-fidelity/production-ready",
+      designSystemNeed: "what must be clarified to make the design system concrete",
+    },
+    knownContext: ["specific facts already known from request/files"],
+    missingContext: ["specific facts missing that materially affect design"],
+    questions: [
+      {
+        id: "audience-priority",
+        question: "A request-specific question in the user's likely language.",
+        why: "How the answer changes layout, copy, hierarchy, visual system, or interaction choices.",
+        kind: "audience",
+        required: true,
+      },
+    ],
+    assumptionsIfSkipped: [],
+    designSystemFocus: ["tokens/patterns/content/interaction decisions that need to be locked"],
+  };
+  return JSON.stringify(example, null, 2);
 }
 
 function trimForPrompt(value: string) {

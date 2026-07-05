@@ -17,6 +17,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   buildCritiquePrompt,
+  buildDesignClarificationPrompt,
   buildDesignSystemSeed,
   buildQualityAuditPrompt,
   buildRepairPrompt,
@@ -32,6 +33,7 @@ import type {
   ConsoleInfo,
   CritiqueManifest,
   DesignBriefManifest,
+  DesignClarificationManifest,
   DesignContextManifest,
   DesignSystemHealth,
   ExportInfo,
@@ -62,8 +64,10 @@ const CHAT_PATH = ".designforge/chat.jsonl";
 const CODEX_SESSION_PATH = ".designforge/codex-session.json";
 const BRIEF_PATH = ".designforge/brief.json";
 const CONTEXT_PATH = ".designforge/context.json";
+const CLARIFICATION_PATH = ".designforge/clarification.json";
 const QUALITY_AUDIT_PATH = ".designforge/quality-audit.json";
 const PROMPT_PATH = "prompts/latest.md";
+const CLARIFICATION_PROMPT_PATH = "prompts/clarification-latest.md";
 const REPAIR_PROMPT_PATH = "prompts/repair-latest.md";
 const CRITIQUE_PROMPT_PATH = "prompts/critique-latest.md";
 const QUALITY_PROMPT_PATH = "prompts/quality-latest.md";
@@ -91,6 +95,7 @@ type ChatMessage = {
 
 type StepStatus = "idle" | "active" | "done" | "error";
 type NavKey = "workbench" | "design" | "history" | "verify";
+type ChatPanelTab = "conversation" | "history";
 
 type PipelineStep = {
   id: string;
@@ -111,7 +116,8 @@ type PreviewSelection = {
 
 type GuidedDraft = {
   request: string;
-  questions: string[];
+  mode: GenerationMode;
+  clarification: DesignClarificationManifest;
   createdAt: string;
 };
 
@@ -121,6 +127,7 @@ type RunRequestOptions = {
   commentNote?: string;
   anchorId?: string;
   screenLabel?: string;
+  clarification?: DesignClarificationManifest | null;
 };
 
 type CodexSessionManifest = {
@@ -134,7 +141,7 @@ type CodexSessionManifest = {
 const NAV_ITEMS: Array<{ key: NavKey; label: string; anchor: string }> = [
   { key: "workbench", label: "작업대", anchor: "preview" },
   { key: "design", label: "디자인 시스템", anchor: "feature-list" },
-  { key: "history", label: "생성 기록", anchor: "run-history" },
+  { key: "history", label: "작업 기록", anchor: "agent-chat" },
   { key: "verify", label: "검증 로그", anchor: "verification" },
 ];
 
@@ -425,28 +432,6 @@ function qualityBarForMode(mode: GenerationMode) {
   return base;
 }
 
-function questionsForMode(mode: GenerationMode, request: string) {
-  const common = [
-    "이 화면을 가장 많이 쓰거나 보게 될 사용자는 누구인가요?",
-    "완성된 화면이 전환, 신뢰, 업무 효율, 탐색, 감성 중 무엇을 가장 우선해야 하나요?",
-    "반드시 따라야 할 브랜드, 레퍼런스, 금지 요소가 있나요?",
-  ];
-  if (mode === "variations") return [...common, "세 방향 중 어떤 기준으로 최종안을 고르면 좋을까요?"];
-  if (/landing|랜딩|website|site/i.test(request)) return [...common, "첫 화면에 꼭 보여야 할 실제 제품 정보, 증거, 이미지가 있나요?"];
-  return [...common, "기존 UI나 자산 중 반드시 기준으로 삼아야 할 것이 있나요?"];
-}
-
-function buildGuidedClarificationMessage(request: string, questions: string[]) {
-  return `좋아요. 바로 생성하기 전에 결과 품질을 높이기 위해 몇 가지만 확인할게요.
-
-요청 요약:
-${request}
-
-${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}
-
-답변을 한 번에 보내면 그 내용을 반영해서 Design Brief와 실제 화면 생성을 진행하겠습니다. 모르는 항목은 "알아서 판단"이라고 적어도 됩니다.`;
-}
-
 function formatBriefForPrompt(brief: DesignBriefManifest) {
   return JSON.stringify(brief, null, 2);
 }
@@ -467,6 +452,91 @@ function formatContextForPrompt(context: DesignContextManifest) {
   );
 }
 
+function formatClarificationForPrompt(clarification: DesignClarificationManifest | null) {
+  return clarification ? JSON.stringify(clarification, null, 2) : "";
+}
+
+function normalizeQuestionKind(value: unknown): DesignClarificationManifest["questions"][number]["kind"] {
+  const allowed = new Set(["audience", "brand", "content", "visual-direction", "interaction", "constraint", "variation", "asset", "other"]);
+  return typeof value === "string" && allowed.has(value) ? (value as DesignClarificationManifest["questions"][number]["kind"]) : "other";
+}
+
+function normalizeClarificationManifest(value: unknown, request: string): DesignClarificationManifest {
+  const data = value && typeof value === "object" ? (value as Partial<DesignClarificationManifest>) : {};
+  const interpretation =
+    data.interpretation && typeof data.interpretation === "object"
+      ? (data.interpretation as Record<string, unknown>)
+      : {};
+  const rawQuestions = Array.isArray(data.questions) ? data.questions : [];
+  const questions = rawQuestions
+    .map((item, index) => {
+      const question = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const text = typeof question.question === "string" ? question.question.trim() : "";
+      if (!text) return null;
+      return {
+        id: typeof question.id === "string" && question.id.trim() ? question.id.trim() : `question-${index + 1}`,
+        question: text,
+        why: typeof question.why === "string" && question.why.trim() ? question.why.trim() : "This answer changes design-system decisions.",
+        kind: normalizeQuestionKind(question.kind),
+        required: typeof question.required === "boolean" ? question.required : true,
+      };
+    })
+    .filter((item): item is DesignClarificationManifest["questions"][number] => Boolean(item));
+
+  return {
+    status: data.status === "skipped" || data.status === "failed" ? data.status : "ready",
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+    request: typeof data.request === "string" && data.request.trim() ? data.request : request,
+    mode: data.mode === "variations" ? "variations" : "guided",
+    promptPath: typeof data.promptPath === "string" ? data.promptPath : CLARIFICATION_PROMPT_PATH,
+    manifestPath: typeof data.manifestPath === "string" ? data.manifestPath : CLARIFICATION_PATH,
+    shouldAskQuestions: typeof data.shouldAskQuestions === "boolean" ? data.shouldAskQuestions && questions.length > 0 : questions.length > 0,
+    confidence: typeof data.confidence === "number" ? Math.max(0, Math.min(100, data.confidence)) : 0,
+    requestType:
+      data.requestType === "targeted-edit" || data.requestType === "system-revision" || data.requestType === "fresh-design"
+        ? data.requestType
+        : "unknown",
+    interpretation: {
+      product: typeof interpretation.product === "string" ? interpretation.product : "",
+      userGoal: typeof interpretation.userGoal === "string" ? interpretation.userGoal : "",
+      targetSurface: typeof interpretation.targetSurface === "string" ? interpretation.targetSurface : "",
+      likelyAudience: typeof interpretation.likelyAudience === "string" ? interpretation.likelyAudience : "",
+      requestedFidelity: typeof interpretation.requestedFidelity === "string" ? interpretation.requestedFidelity : "",
+      designSystemNeed: typeof interpretation.designSystemNeed === "string" ? interpretation.designSystemNeed : "",
+    },
+    knownContext: Array.isArray(data.knownContext) ? data.knownContext.filter((item): item is string => typeof item === "string") : [],
+    missingContext: Array.isArray(data.missingContext) ? data.missingContext.filter((item): item is string => typeof item === "string") : [],
+    questions,
+    assumptionsIfSkipped: Array.isArray(data.assumptionsIfSkipped)
+      ? data.assumptionsIfSkipped.filter((item): item is string => typeof item === "string")
+      : [],
+    designSystemFocus: Array.isArray(data.designSystemFocus) ? data.designSystemFocus.filter((item): item is string => typeof item === "string") : [],
+    error: typeof data.error === "string" ? data.error : undefined,
+  };
+}
+
+function buildClarificationChatMessage(clarification: DesignClarificationManifest) {
+  const interpretation = [
+    clarification.interpretation.product ? `제품/대상: ${clarification.interpretation.product}` : "",
+    clarification.interpretation.targetSurface ? `화면: ${clarification.interpretation.targetSurface}` : "",
+    clarification.interpretation.userGoal ? `목표: ${clarification.interpretation.userGoal}` : "",
+    clarification.interpretation.designSystemNeed ? `디자인 시스템 쟁점: ${clarification.interpretation.designSystemNeed}` : "",
+  ].filter(Boolean);
+
+  const questions = clarification.questions
+    .map((question, index) => `${index + 1}. ${question.question}\n   이유: ${question.why}`)
+    .join("\n");
+
+  return `요청을 먼저 해석했습니다.
+
+${interpretation.length ? interpretation.join("\n") : "현재 요청과 워크스페이스 문맥을 기준으로 추가 확인이 필요합니다."}
+
+확인 질문:
+${questions}
+
+한 번에 답변해 주세요. 답변을 받으면 이 분석과 답변을 함께 Design Brief에 반영해 실제 화면 생성을 진행합니다.`;
+}
+
 export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [workspacePath, setWorkspacePath] = useState(settings.lastWorkspacePath);
@@ -474,6 +544,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [activeNav, setActiveNav] = useState<NavKey>("workbench");
+  const [chatPanelTab, setChatPanelTab] = useState<ChatPanelTab>("conversation");
   const [generationMode, setGenerationMode] = useState<GenerationMode>("guided");
   const [guidedDraft, setGuidedDraft] = useState<GuidedDraft | null>(null);
   const [steps, setSteps] = useState<PipelineStep[]>(START_STEPS);
@@ -498,6 +569,7 @@ export default function App() {
   const [manualExportPath, setManualExportPath] = useState("");
   const [latestBrief, setLatestBrief] = useState<DesignBriefManifest | null>(null);
   const [latestContext, setLatestContext] = useState<DesignContextManifest | null>(null);
+  const [latestClarification, setLatestClarification] = useState<DesignClarificationManifest | null>(null);
 
   const visibleFiles = useMemo(
     () =>
@@ -509,9 +581,11 @@ export default function App() {
             "AGENTS.md",
             CHAT_PATH,
             CODEX_SESSION_PATH,
+            CLARIFICATION_PATH,
             BRIEF_PATH,
             CONTEXT_PATH,
             QUALITY_AUDIT_PATH,
+            CLARIFICATION_PROMPT_PATH,
             PROMPT_PATH,
             REPAIR_PROMPT_PATH,
             CRITIQUE_PROMPT_PATH,
@@ -560,6 +634,7 @@ export default function App() {
         await loadCodexSession(workspacePath);
         await loadAnchorManifest(workspacePath);
         await loadChatHistory(workspacePath);
+        await loadDesignClarification(workspacePath);
         await loadDesignBrief(workspacePath);
         await loadDesignContext(workspacePath);
         await loadQualityAudit(workspacePath);
@@ -586,8 +661,12 @@ export default function App() {
 
   function activateNav(item: (typeof NAV_ITEMS)[number]) {
     setActiveNav(item.key);
-    const target = document.querySelector<HTMLElement>(`[data-comment-anchor="${item.anchor}"]`);
-    target?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+    if (item.key === "history") setChatPanelTab("history");
+    if (item.key === "workbench") setChatPanelTab("conversation");
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(`[data-comment-anchor="${item.anchor}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+    });
   }
 
   function createChatMessage(
@@ -684,6 +763,18 @@ export default function App() {
       return manifest;
     } catch {
       setLatestContext(null);
+      return null;
+    }
+  }
+
+  async function loadDesignClarification(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CLARIFICATION_PATH });
+      const manifest = normalizeClarificationManifest(JSON.parse(raw), "");
+      setLatestClarification(manifest);
+      return manifest;
+    } catch {
+      setLatestClarification(null);
       return null;
     }
   }
@@ -792,17 +883,46 @@ export default function App() {
       updatedAt: new Date().toISOString(),
       resetAt: new Date().toISOString(),
     };
+    try {
+      await callTauri("stop_preview");
+    } catch {
+      // Preview may not be running; reset should still continue.
+    }
+    await callTauri("reset_workspace_design_state", { workspacePath: target });
     await callTauri("write_file", {
       workspacePath: target,
       relativePath: CODEX_SESSION_PATH,
       content: JSON.stringify(manifest, null, 2),
     });
     setCodexSession(null);
+    setPreview(null);
+    setSelectionMode(false);
+    setAnchorManifest(null);
+    setRunHistory([]);
     setSelectedAnchorId("");
     setPreviewSelection(null);
     setComponentEdit("");
     setGuidedDraft(null);
-    pushLog("info", "Codex session reset. Next design run will start fresh.");
+    setInput("");
+    setGenerationMode("guided");
+    setChatPanelTab("conversation");
+    setMessages(createIntroMessages());
+    setLatestClarification(null);
+    setLatestBrief(null);
+    setLatestContext(null);
+    setManualVerifyResult(null);
+    setManualConsoleInfo(null);
+    setManualScreenshotInfo(null);
+    setManualCritique(null);
+    setManualQualityAudit(null);
+    setManualExportPath("");
+    setSteps(START_STEPS);
+    await callTauri("write_file", {
+      workspacePath: target,
+      relativePath: CHAT_PATH,
+      content: "",
+    });
+    pushLog("info", "Started a fresh design system, cleared prior runs, and reset the Codex session.");
     await refreshFiles(target);
   }
 
@@ -1026,11 +1146,19 @@ export default function App() {
     mode: GenerationMode,
     designSystemHealth: DesignSystemHealth,
     context: DesignContextManifest,
+    clarification: DesignClarificationManifest | null = latestClarification,
   ) {
-    const classification = classifyRequestForBrief(request);
+    const classification =
+      clarification?.requestType === "targeted-edit" || clarification?.requestType === "system-revision" || clarification?.requestType === "fresh-design"
+        ? clarification.requestType
+        : classifyRequestForBrief(request);
+    const audienceAssumption = clarification?.interpretation.likelyAudience || inferAudienceAssumption(request);
+    const purposeAssumption = clarification?.interpretation.userGoal || inferPurposeAssumption(request);
     const assumptions = [
-      inferAudienceAssumption(request),
-      inferPurposeAssumption(request),
+      audienceAssumption,
+      purposeAssumption,
+      ...(clarification?.assumptionsIfSkipped ?? []),
+      ...(clarification?.knownContext ?? []).slice(0, 4),
       context.assetFiles.length
         ? "Use available local assets when they match the requested surface."
         : "No local assets were found, so the design should avoid invented brand marks and fake imagery.",
@@ -1043,13 +1171,14 @@ export default function App() {
       request,
       mode,
       classification,
-      audienceAssumption: inferAudienceAssumption(request),
-      purposeAssumption: inferPurposeAssumption(request),
+      audienceAssumption,
+      purposeAssumption,
       qualityBar: qualityBarForMode(mode),
-      questionsToConsider: questionsForMode(mode, request),
+      questionsToConsider: clarification?.questions.map((question) => `${question.question} (${question.why})`) ?? [],
       assumptions,
       designSystemHealth,
       contextPath: CONTEXT_PATH,
+      clarificationPath: clarification ? CLARIFICATION_PATH : undefined,
     };
     await callTauri("write_file", {
       workspacePath: path,
@@ -1110,6 +1239,7 @@ export default function App() {
     request: string,
     brief: DesignBriefManifest,
     context: DesignContextManifest,
+    clarification: DesignClarificationManifest | null = latestClarification,
   ) {
     const feedbackContext = buildFeedbackContext(await loadComments(path));
     const prompt = buildStructuredPrompt(request, {
@@ -1117,8 +1247,10 @@ export default function App() {
       feedbackContext,
       briefPath: BRIEF_PATH,
       contextPath: CONTEXT_PATH,
+      clarificationPath: CLARIFICATION_PATH,
       briefContext: formatBriefForPrompt(brief),
       contextSummary: formatContextForPrompt(context),
+      clarificationContext: formatClarificationForPrompt(clarification),
       generationMode: brief.mode,
     });
     await callTauri("write_file", {
@@ -1127,6 +1259,36 @@ export default function App() {
       content: prompt,
     });
     pushLog("success", `Compiled ${PROMPT_PATH}.`);
+    return prompt;
+  }
+
+  async function writeClarificationPrompt(
+    path: string,
+    request: string,
+    mode: GenerationMode,
+    context: DesignContextManifest,
+    designSystemHealth: DesignSystemHealth,
+    designSystemMarkdown: string,
+  ) {
+    const feedbackContext = buildFeedbackContext(await loadComments(path));
+    const prompt = buildDesignClarificationPrompt(request, {
+      artifactPath: ARTIFACT_PATH,
+      designSystemPath: "DESIGN.md",
+      contextPath: CONTEXT_PATH,
+      clarificationPath: CLARIFICATION_PATH,
+      contextSummary: formatContextForPrompt(context),
+      generationMode: mode,
+      mode,
+      designSystemHealth,
+      designSystemExcerpt: designSystemMarkdown.slice(0, 12000),
+      recentFeedback: feedbackContext,
+    });
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: CLARIFICATION_PROMPT_PATH,
+      content: prompt,
+    });
+    pushLog("success", `Compiled ${CLARIFICATION_PROMPT_PATH}.`);
     return prompt;
   }
 
@@ -1350,6 +1512,7 @@ export default function App() {
     critique: CritiqueManifest | null,
   ) {
     let designSystem = "";
+    let clarification = "";
     let designBrief = "";
     let designContext = "";
     let qualityAudit = "";
@@ -1357,6 +1520,11 @@ export default function App() {
       designSystem = await callTauri<string>("read_file", { workspacePath: path, relativePath: "DESIGN.md" });
     } catch {
       designSystem = "DESIGN.md was unavailable when the handoff was created.";
+    }
+    try {
+      clarification = await callTauri<string>("read_file", { workspacePath: path, relativePath: CLARIFICATION_PATH });
+    } catch {
+      clarification = "";
     }
     try {
       designBrief = await callTauri<string>("read_file", { workspacePath: path, relativePath: BRIEF_PATH });
@@ -1399,7 +1567,10 @@ High-fidelity frontend screen generated from this request. TypeScript/Vite verif
 
 - Design brief: ${designBrief ? BRIEF_PATH : "not-created"}
 - Context manifest: ${designContext ? CONTEXT_PATH : "not-created"}
+- Clarification analysis: ${clarification ? CLARIFICATION_PATH : "not-created"}
 - Quality audit: ${qualityAudit ? QUALITY_AUDIT_PATH : "not-created"}
+
+${clarification ? `### Clarification\n\n\`\`\`json\n${clarification.trim()}\n\`\`\`` : ""}
 
 ${designBrief ? `### Brief\n\n\`\`\`json\n${designBrief.trim()}\n\`\`\`` : ""}
 
@@ -1458,6 +1629,8 @@ ${designSystem.trim()}
 - CODEX_DESIGN.md
 - ${ANCHORS_PATH}
 - ${PROMPT_PATH}
+- ${CLARIFICATION_PATH}
+- ${CLARIFICATION_PROMPT_PATH}
 - ${BRIEF_PATH}
 - ${CONTEXT_PATH}
 ${qualityAudit ? `- ${QUALITY_AUDIT_PATH}` : ""}
@@ -1853,22 +2026,107 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
-  async function startGuidedClarification(request: string) {
-    const questions = questionsForMode("guided", request).slice(0, 4);
-    const draft = { request, questions, createdAt: new Date().toISOString() };
+  async function startGuidedClarification(request: string, mode: GenerationMode) {
     setInput("");
+    setChatPanelTab("conversation");
     setBusy(true);
-    setGuidedDraft(draft);
     try {
       const path = await ensureWorkspace();
+      await ensurePreviewSelectionBridge(path);
+      await refreshFiles(path);
+      await loadRunHistory(path);
       await loadChatHistory(path);
+      await loadAnchorManifest(path);
       await appendChatMessage(path, "user", request);
-      await appendChatMessage(path, "assistant", buildGuidedClarificationMessage(request, questions), "chat", "info");
-      pushLog("info", "Guided mode requested clarification before generation.");
+      await appendChatMessage(path, "assistant", "요청과 현재 디자인 시스템을 먼저 분석한 뒤 필요한 질문을 만들겠습니다.", "status", "info");
+
+      const designSystemMarkdown = await readDesignSystem(path);
+      const designSystemHealth = inspectDesignSystem(designSystemMarkdown);
+      const context = await writeDesignContextManifest(path);
+      const prompt = await writeClarificationPrompt(path, request, mode, context, designSystemHealth, designSystemMarkdown);
+      await runCodexPrompt(path, prompt, "Codex design preflight");
+
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CLARIFICATION_PATH });
+      const clarification = normalizeClarificationManifest(JSON.parse(raw), request);
+      const nextClarification = {
+        ...clarification,
+        mode,
+        request,
+        promptPath: CLARIFICATION_PROMPT_PATH,
+        manifestPath: CLARIFICATION_PATH,
+        updatedAt: new Date().toISOString(),
+      };
+      await callTauri("write_file", {
+        workspacePath: path,
+        relativePath: CLARIFICATION_PATH,
+        content: JSON.stringify(nextClarification, null, 2),
+      });
+      setLatestClarification(nextClarification);
+      await refreshFiles(path);
+
+      if (nextClarification.shouldAskQuestions) {
+        setGuidedDraft({ request, mode, clarification: nextClarification, createdAt: new Date().toISOString() });
+        await appendChatMessage(path, "assistant", buildClarificationChatMessage(nextClarification), "chat", "info");
+        pushLog("info", `AI preflight produced ${nextClarification.questions.length} tailored questions.`);
+        return nextClarification;
+      }
+
+      await appendChatMessage(
+        path,
+        "assistant",
+        "분석 결과, 추가 질문 없이 현재 맥락으로 진행할 수 있습니다. 바로 생성합니다.",
+        "status",
+        "info",
+      );
+      pushLog("info", "AI preflight skipped questions because context was sufficient.");
+      return nextClarification;
     } catch (error) {
-      pushMessage("user", request);
-      pushMessage("assistant", buildGuidedClarificationMessage(request, questions), "chat", "info");
-      pushLog("error", `Could not persist guided clarification: ${textFromError(error)}`);
+      const message = textFromError(error);
+      pushLog("error", `Design preflight failed: ${message}`);
+      const failed: DesignClarificationManifest = {
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        request,
+        mode,
+        promptPath: CLARIFICATION_PROMPT_PATH,
+        manifestPath: CLARIFICATION_PATH,
+        shouldAskQuestions: false,
+        confidence: 0,
+        requestType: "unknown",
+        interpretation: {
+          product: "",
+          userGoal: "",
+          targetSurface: "",
+          likelyAudience: "",
+          requestedFidelity: "",
+          designSystemNeed: "",
+        },
+        knownContext: [],
+        missingContext: [],
+        questions: [],
+        assumptionsIfSkipped: [],
+        designSystemFocus: [],
+        error: message,
+      };
+      setLatestClarification(failed);
+      setGuidedDraft({ request, mode, clarification: failed, createdAt: new Date().toISOString() });
+      if (workspacePath) {
+        await appendChatMessage(
+          workspacePath,
+          "assistant",
+          `질문 생성이 실패했습니다: ${message}\n\n원래 요청은 보존했습니다. 입력창에 "진행해"처럼 답하면 추가 질문 없이 원 요청 기준으로 생성을 진행합니다.`,
+          "tool",
+          "error",
+        );
+      } else {
+        pushMessage(
+          "assistant",
+          `질문 생성이 실패했습니다: ${message}\n\n원래 요청은 보존했습니다. 입력창에 "진행해"처럼 답하면 추가 질문 없이 원 요청 기준으로 생성을 진행합니다.`,
+          "tool",
+          "error",
+        );
+      }
+      return failed;
     } finally {
       setBusy(false);
     }
@@ -1878,25 +2136,44 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     const request = input.trim();
     if (!request || busy) return;
 
-    if (generationMode === "guided" && !guidedDraft) {
-      await startGuidedClarification(request);
+    if (!guidedDraft) {
+      const clarification = await startGuidedClarification(request, generationMode);
+      if (clarification.status !== "failed" && !clarification.shouldAskQuestions) {
+        await runDesignRequest(request, { clarification });
+      }
       return;
     }
 
-    if (generationMode === "guided" && guidedDraft) {
-      const combinedRequest = `${guidedDraft.request}
+    if (guidedDraft) {
+      const isFailedPreflight = guidedDraft.clarification.status === "failed";
+      const combinedRequest = isFailedPreflight
+        ? `${guidedDraft.request}
 
-Guided clarification answers:
+DesignForge preflight failed:
+${JSON.stringify(guidedDraft.clarification, null, 2)}
+
+User follow-up after preflight failure:
+${request}
+
+Proceed from the original request. Infer missing context conservatively and record assumptions in DESIGN.md.`
+        : `${guidedDraft.request}
+
+DesignForge preflight analysis:
+${JSON.stringify(guidedDraft.clarification, null, 2)}
+
+User answers to preflight questions:
 ${request}`;
       const recordRequest = `${guidedDraft.request}
 
 질문 답변:
 ${request}`;
+      const clarification = guidedDraft.clarification;
       setGuidedDraft(null);
       await runDesignRequest(combinedRequest, {
         displayRequest: request,
         recordRequest,
         commentNote: recordRequest,
+        clarification,
       });
       return;
     }
@@ -1909,6 +2186,7 @@ ${request}`;
     if (!request || busy) return;
 
     setInput("");
+    setChatPanelTab("conversation");
     setBusy(true);
     setSteps(START_STEPS);
     setManualVerifyResult(null);
@@ -1930,6 +2208,7 @@ ${request}`;
     let anchors: AnchorManifest | null = null;
     let brief: DesignBriefManifest | null = null;
     let context: DesignContextManifest | null = null;
+    const clarification = options.clarification ?? latestClarification;
 
     try {
       setStep("context", "active");
@@ -1940,6 +2219,8 @@ ${request}`;
       await loadCodexSession(path);
       await loadAnchorManifest(path);
       await loadChatHistory(path);
+      if (clarification) setLatestClarification(clarification);
+      else await loadDesignClarification(path);
       await loadQualityAudit(path);
       await appendChatMessage(path, "user", displayRequest);
       await appendChatMessage(path, "assistant", "워크스페이스와 이전 DesignForge 대화를 연결했습니다.", "status", "info");
@@ -1952,7 +2233,7 @@ ${request}`;
 
       setStep("brief", "active");
       context = await writeDesignContextManifest(path);
-      brief = await writeDesignBriefManifest(path, request, generationMode, designHealth, context);
+      brief = await writeDesignBriefManifest(path, request, generationMode, designHealth, context, clarification);
       setLatestContext(context);
       setLatestBrief(brief);
       await appendChatMessage(
@@ -1965,7 +2246,7 @@ ${request}`;
       setStep("brief", "done");
 
       setStep("prompt", "active");
-      const prompt = await writePrompt(path, request, brief, context);
+      const prompt = await writePrompt(path, request, brief, context, clarification);
       await appendChatMessage(path, "assistant", `${PROMPT_PATH}에 Codex 전달 프롬프트를 준비했습니다.`, "tool", "success");
       setStep("prompt", "done");
 
@@ -1997,6 +2278,7 @@ ${request}`;
         anchorCount: anchors.anchors.length,
         briefPath: BRIEF_PATH,
         contextPath: CONTEXT_PATH,
+        clarificationPath: clarification ? CLARIFICATION_PATH : undefined,
         codexExitCode: lastResult?.code ?? result.code,
         codexSessionId: (lastResult ?? result).sessionId ?? codexSession?.sessionId,
         codexUsedResume: (lastResult ?? result).usedResume,
@@ -2042,6 +2324,7 @@ ${request}`;
           anchorCount: anchors?.anchors.length,
           briefPath: brief ? BRIEF_PATH : undefined,
           contextPath: context ? CONTEXT_PATH : undefined,
+          clarificationPath: clarification ? CLARIFICATION_PATH : undefined,
           codexExitCode: lastResult?.code ?? null,
           codexSessionId: lastResult?.sessionId ?? codexSession?.sessionId,
           codexUsedResume: lastResult?.usedResume,
@@ -2106,6 +2389,15 @@ ${request}`;
   const qualityStatus = manualQualityAudit?.status ?? latestRun?.qualityAuditStatus;
   const designHealth = latestBrief?.designSystemHealth;
   const visibleLogs = showAllLogs ? logs : logs.slice(-8);
+  const conversationMessages = useMemo(
+    () => messages.filter((message) => message.kind !== "status" && message.kind !== "tool"),
+    [messages],
+  );
+  const activityMessages = useMemo(
+    () => messages.filter((message) => message.kind === "status" || message.kind === "tool"),
+    [messages],
+  );
+  const historyCount = activityMessages.length + runHistory.length;
   const verificationRows: Array<{ name: string; value: string; tone: "lime" | "cyan" | "amber" | "danger" | "steel" }> = [
     {
       name: "TypeScript/Vite",
@@ -2160,11 +2452,11 @@ ${request}`;
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="grid h-screen min-w-[1180px] grid-cols-[360px_minmax(520px,1fr)_340px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+      className="grid h-screen min-w-[1280px] grid-cols-[minmax(680px,0.95fr)_minmax(300px,1fr)_300px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
     >
       <aside
         data-comment-anchor="navigation"
-        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--panel)] px-5 py-5"
+        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--panel)] px-6 py-5"
       >
         <header className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
@@ -2181,7 +2473,7 @@ ${request}`;
           <Badge tone={codexSession ? "lime" : "cyan"}>{codexSession ? `session ${codexSessionLabel}` : "Codex ready"}</Badge>
         </header>
 
-        <nav className="mt-7 grid gap-1 text-sm text-[var(--charcoal)]" aria-label="작업 보기">
+        <nav className="mt-5 grid grid-cols-4 gap-2 text-sm text-[var(--charcoal)]" aria-label="작업 보기">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.key}
@@ -2189,7 +2481,7 @@ ${request}`;
               onClick={() => activateNav(item)}
               aria-current={activeNav === item.key ? "page" : undefined}
               className={cn(
-                "flex min-h-10 items-center justify-between rounded-full px-4 text-left transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                "flex min-h-10 items-center justify-center gap-2 rounded-full px-3 text-center transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
                 activeNav === item.key
                   ? "border border-[var(--line)] bg-[var(--panel-2)] text-[var(--ink-strong)]"
                   : "hover:bg-[var(--panel-2)]",
@@ -2207,105 +2499,185 @@ ${request}`;
             className="min-h-9 flex-1 px-3 text-xs"
             onClick={() => void resetCodexSession()}
             disabled={busy}
-            title="이전 Codex 대화 세션을 끊고 다음 생성은 새 세션으로 시작합니다."
+            title="현재 채팅, 디자인 시스템, 생성 화면을 초기화하고 새 Codex 세션으로 시작합니다."
           >
             새 디자인 시작
           </Button>
           <Badge tone="steel">{codexSession ? "resume on" : "fresh next"}</Badge>
         </div>
 
-        <section data-comment-anchor="agent-chat" className="mt-5 flex min-h-[560px] flex-1 flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-white">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
-            <div className="min-w-0">
-              <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design conversation</p>
-              <h2 className="mt-1 text-lg font-semibold text-[var(--ink-strong)]">디자인 대화</h2>
+        <section data-comment-anchor="agent-chat" className="mt-5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
+          <div className="border-b border-[var(--line)] px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design conversation</p>
+                <h2 className="mt-1 text-2xl font-semibold text-[var(--ink-strong)]">디자인 대화</h2>
+              </div>
+              <Badge tone={guidedDraft ? "cyan" : "steel"}>
+                {chatPanelTab === "conversation"
+                  ? guidedDraft
+                    ? "답변 대기"
+                    : `${conversationMessages.length}개`
+                  : `${historyCount}개`}
+              </Badge>
             </div>
-            <Badge tone={guidedDraft ? "cyan" : "steel"}>{guidedDraft ? "답변 대기" : `${messages.length}개`}</Badge>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] px-4 py-4">
-            <div className="grid gap-3">
-              {messages.slice(-40).map((message) => (
-                <ChatRow key={message.id} message={message} />
+            <div className="mt-4 grid grid-cols-2 gap-2 rounded-full bg-[var(--panel-2)] p-1">
+              {[
+                { tab: "conversation" as ChatPanelTab, label: "현재 대화", count: conversationMessages.length },
+                { tab: "history" as ChatPanelTab, label: "작업 기록", count: historyCount },
+              ].map(({ tab, label, count }) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setChatPanelTab(tab)}
+                  className={cn(
+                    "flex min-h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                    chatPanelTab === tab ? "bg-white text-[var(--ink-strong)] shadow-sm" : "text-[var(--charcoal)] hover:bg-white/70",
+                  )}
+                >
+                  <span>{label}</span>
+                  <span className="font-mono text-xs text-[var(--muted)]">{count}</span>
+                </button>
               ))}
             </div>
           </div>
 
-          <div data-comment-anchor="hero" className="border-t border-[var(--line)] bg-white p-3">
-            {guidedDraft ? (
-              <div className="mb-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--charcoal)]">
-                <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
-                <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
+          {chatPanelTab === "conversation" ? (
+            <>
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--panel-2)] px-5 py-5">
+                <div className="grid gap-4">
+                  {conversationMessages.slice(-60).map((message) => (
+                    <ChatRow key={message.id} message={message} />
+                  ))}
+                </div>
               </div>
-            ) : null}
 
-            <label className="mb-2 inline-flex min-h-8 items-center gap-2 rounded-full border border-[var(--line)] bg-white px-3 text-xs font-medium text-[var(--charcoal)]">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-black"
-                checked={generationMode === "variations"}
-                onChange={(event) => selectGenerationMode(event.target.checked ? "variations" : "guided")}
-                disabled={busy || Boolean(guidedDraft)}
-              />
-              3안으로 비교 생성
-            </label>
+              <div data-comment-anchor="hero" className="border-t border-[var(--line)] bg-white p-4">
+                {guidedDraft ? (
+                  <div className="mb-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-3 text-sm leading-6 text-[var(--charcoal)]">
+                    <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
+                    <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
+                  </div>
+                ) : null}
 
-            <label className="sr-only" htmlFor="designforge-request">
-              DesignForge 요청
-            </label>
-            <textarea
-              id="designforge-request"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
-              }}
-              className="min-h-28 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-[15px] leading-7 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
-              placeholder={
-                guidedDraft
-                  ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
-                  : "DesignForge에게 만들고 싶은 화면이나 수정할 컴포넌트를 대화하듯 입력하세요."
-              }
-              disabled={busy}
-            />
-            <div data-comment-anchor="primary-action" className="mt-3 flex justify-end gap-2">
-              <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => {
-                setInput("");
-                setGuidedDraft(null);
-              }} disabled={busy || (!input && !guidedDraft)} aria-label="입력 비우기">
-                비우기
-              </Button>
-              <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-9 px-4 text-xs">
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                {guidedDraft ? "답변 보내기" : "보내기"}
-              </Button>
+                <label className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--line)] bg-white px-4 text-sm font-medium text-[var(--charcoal)]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-black"
+                    checked={generationMode === "variations"}
+                    onChange={(event) => selectGenerationMode(event.target.checked ? "variations" : "guided")}
+                    disabled={busy || Boolean(guidedDraft)}
+                  />
+                  3안 비교 생성
+                </label>
+
+                <label className="sr-only" htmlFor="designforge-request">
+                  DesignForge 요청
+                </label>
+                <textarea
+                  id="designforge-request"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
+                  }}
+                  className="min-h-36 w-full resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--panel-2)] p-5 text-base leading-8 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+                  placeholder={
+                    guidedDraft
+                      ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
+                      : "DesignForge에게 만들고 싶은 화면이나 수정할 컴포넌트를 대화하듯 입력하세요."
+                  }
+                  disabled={busy}
+                />
+                <div data-comment-anchor="primary-action" className="mt-3 flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    className="min-h-9 px-4 text-xs"
+                    onClick={() => {
+                      setInput("");
+                      setGuidedDraft(null);
+                    }}
+                    disabled={busy || (!input && !guidedDraft)}
+                    aria-label="입력 비우기"
+                  >
+                    비우기
+                  </Button>
+                  <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-9 px-5 text-xs">
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    {guidedDraft ? "답변 보내기" : "보내기"}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div data-comment-anchor="run-history" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--panel-2)] px-5 py-5">
+              <div className="grid gap-5">
+                <section className="rounded-2xl border border-[var(--line)] bg-white p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
+                      <History size={16} className="text-[var(--accent)]" />
+                      대화 작업 로그
+                    </div>
+                    <Badge tone="steel">{activityMessages.length}개</Badge>
+                  </div>
+                  <div className="grid gap-3">
+                    {activityMessages.length === 0 && (
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm text-[var(--muted)]">
+                        아직 분리된 작업 로그가 없습니다.
+                      </div>
+                    )}
+                    {activityMessages.slice(-30).map((message) => (
+                      <ChatRow key={message.id} message={message} />
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-[var(--line)] bg-white p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
+                      <History size={16} className="text-[var(--accent)]" />
+                      생성 실행 기록
+                    </div>
+                    <Badge tone="steel">{runHistory.length}개</Badge>
+                  </div>
+                  <div className="grid gap-3">
+                    {runHistory.length === 0 && (
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm text-[var(--muted)]">
+                        기록된 실행이 없습니다.
+                      </div>
+                    )}
+                    {runHistory.map((run) => (
+                      <div key={run.id} className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                        <div className="mb-3 flex items-center justify-between gap-2 text-xs">
+                          <Badge tone={runTone(run.status)}>
+                            {run.status === "success" ? "success" : "error"}
+                            {run.repairAttempts ? ` · repair ${run.repairAttempts}` : ""}
+                          </Badge>
+                          <span className="text-[var(--muted)]">{new Date(run.finishedAt).toLocaleTimeString()}</span>
+                        </div>
+                        <div className="line-clamp-3 text-sm leading-6 text-[var(--ink)]">{run.request}</div>
+                        {(run.codexSessionId || run.previewStatus || run.exportPath) && (
+                          <div className="mt-3 grid gap-1 text-xs leading-5 text-[var(--muted)]">
+                            {run.codexSessionId && (
+                              <span className="truncate font-mono">
+                                codex: {shortSessionId(run.codexSessionId)} {run.codexUsedResume ? "resume" : "fresh"}
+                              </span>
+                            )}
+                            {run.previewStatus && <span>preview: {run.previewStatus}</span>}
+                            {run.critiqueStatus && <span>critique: {run.critiqueStatus}</span>}
+                            {run.screenshotPath && <span className="truncate font-mono">{run.screenshotPath}</span>}
+                            {run.exportPath && <span className="truncate font-mono">{truncatePath(run.exportPath)}</span>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
             </div>
-          </div>
+          )}
         </section>
 
-        <section data-comment-anchor="feature-list" className="mt-5 rounded-xl border border-[var(--line)] bg-white">
-          <div className="border-b border-[var(--line)] p-4">
-            <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design system</p>
-            <h2 className="mt-2 text-xl font-medium tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
-          </div>
-          {[
-            ["Brief", latestBrief?.mode ?? generationMode, designHealth ? `${designHealth.score}/100` : "pending"],
-            ["Context", latestContext ? `${latestContext.assetFiles.length} assets` : "pending", latestContext ? `${latestContext.sourceFiles.length} src` : "ready"],
-            ["System", designHealth?.status ?? "not scored", designHealth?.missingSections.length ? `${designHealth.missingSections.length} gaps` : "stable"],
-            ["Artifact", ARTIFACT_PATH, preview ? "live" : "ready"],
-          ].map(([name, value, note]) => (
-            <div
-              key={name}
-              className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3 last:border-b-0"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--ink)]">{name}</p>
-                <p className="truncate font-mono text-xs text-[var(--muted)]">{value}</p>
-              </div>
-              <span className="shrink-0 text-right text-xs text-[var(--muted)]">{note}</span>
-            </div>
-          ))}
-        </section>
       </aside>
 
       <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-[var(--canvas)]">
@@ -2439,6 +2811,35 @@ ${request}`;
             {busy ? "실행 중" : latestRun?.status === "success" ? "생성 완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
           </Badge>
         </div>
+
+        <section data-comment-anchor="feature-list" className="mt-5 rounded-xl border border-[var(--line)] bg-white">
+          <div className="border-b border-[var(--line)] p-4">
+            <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design system</p>
+            <h2 className="mt-2 text-lg font-medium tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
+          </div>
+          {[
+            ["Brief", latestBrief?.mode ?? generationMode, designHealth ? `${designHealth.score}/100` : "pending"],
+            [
+              "Clarify",
+              latestClarification ? `${latestClarification.confidence}/100` : "pending",
+              latestClarification?.shouldAskQuestions ? `${latestClarification.questions.length} qs` : latestClarification ? "skipped" : "AI",
+            ],
+            ["Context", latestContext ? `${latestContext.assetFiles.length} assets` : "pending", latestContext ? `${latestContext.sourceFiles.length} src` : "ready"],
+            ["System", designHealth?.status ?? "not scored", designHealth?.missingSections.length ? `${designHealth.missingSections.length} gaps` : "stable"],
+            ["Artifact", ARTIFACT_PATH, preview ? "live" : "ready"],
+          ].map(([name, value, note]) => (
+            <div
+              key={name}
+              className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3 last:border-b-0"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--ink)]">{name}</p>
+                <p className="truncate font-mono text-xs text-[var(--muted)]">{value}</p>
+              </div>
+              <span className="shrink-0 text-right text-xs text-[var(--muted)]">{note}</span>
+            </div>
+          ))}
+        </section>
 
         <section data-comment-anchor="component-edit" className="mt-5">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -2603,37 +3004,6 @@ ${request}`;
           </p>
         </section>
 
-        <section data-comment-anchor="run-history" className="mt-7">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
-            <History size={16} className="text-[var(--accent)]" />
-            생성 기록
-          </div>
-          <div className="grid gap-2">
-            {runHistory.length === 0 && <div className="text-xs text-[var(--muted)]">기록된 실행이 없습니다.</div>}
-            {runHistory.slice(0, 3).map((run) => (
-              <div key={run.id} className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3">
-                <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-                  <Badge tone={runTone(run.status)}>
-                    {run.status === "success" ? "success" : "error"}
-                    {run.repairAttempts ? ` · repair ${run.repairAttempts}` : ""}
-                  </Badge>
-                  <span className="text-[var(--muted)]">{new Date(run.finishedAt).toLocaleTimeString()}</span>
-                </div>
-                <div className="line-clamp-2 text-xs leading-5 text-[var(--ink)]">{run.request}</div>
-                {(run.codexSessionId || run.previewStatus || run.exportPath) && (
-                  <div className="mt-2 grid gap-1 text-[11px] leading-4 text-[var(--muted)]">
-                    {run.codexSessionId && <span className="truncate font-mono">codex: {shortSessionId(run.codexSessionId)} {run.codexUsedResume ? "resume" : "fresh"}</span>}
-                    {run.previewStatus && <span>preview: {run.previewStatus}</span>}
-                    {run.critiqueStatus && <span>critique: {run.critiqueStatus}</span>}
-                    {run.screenshotPath && <span className="truncate font-mono">{run.screenshotPath}</span>}
-                    {run.exportPath && <span className="truncate font-mono">{truncatePath(run.exportPath)}</span>}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-
         <section data-comment-anchor="export" className="mt-7 border-t border-[var(--line)] pt-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -2702,13 +3072,13 @@ function ChatRow({ message }: { message: ChatMessage }) {
           : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]";
 
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
-      <div className={cn("max-w-[94%] rounded-2xl border px-4 py-3 text-[15px] leading-7 shadow-sm", levelClass)}>
-        <div className="mb-1 flex items-center justify-between gap-3">
+    <div className={cn("flex min-w-0 max-w-full", isUser ? "justify-end" : "justify-start")}>
+      <div className={cn("min-w-0 max-w-[min(88%,58ch)] rounded-[20px] border px-5 py-4 text-base leading-8 shadow-sm", levelClass)}>
+        <div className="mb-2 flex items-center justify-between gap-3">
           <span className="font-medium">{isUser ? "user" : message.kind ?? "DesignForge"}</span>
-          <span className={cn("shrink-0 font-mono text-[10px]", isUser ? "text-white/70" : "text-[var(--muted)]")}>{timestamp}</span>
+          <span className={cn("shrink-0 font-mono text-[11px]", isUser ? "text-white/70" : "text-[var(--muted)]")}>{timestamp}</span>
         </div>
-        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content}</p>
       </div>
     </div>
   );

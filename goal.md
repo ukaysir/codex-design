@@ -9,14 +9,28 @@ DesignForge exists to produce better design, not merely to generate React files.
 Completed and verified on 2026-07-05 13:23 +09:00.
 
 - Documentation drift repaired in `README.md`, `development.md`, and default workspace instructions.
-- Design brief, context manifest, design-system health gate, generation modes, manual quality audit, and handoff quality evidence are implemented.
+- AI preflight clarification, design brief, context manifest, design-system health gate, generation modes, manual quality audit, and handoff quality evidence are implemented.
 - Release build produced `src-tauri/target/release/designforge.exe`.
 - NSIS installer produced `src-tauri/target/release/bundle/nsis/DesignForge_0.1.0_x64-setup.exe`.
+
+Correction pass completed on 2026-07-05 14:30 +09:00.
+
+- Replaced hardcoded clarification questions with a Codex preflight pass that reads request, `DESIGN.md`, context manifest, existing artifact, assets, and prior feedback.
+- Added `.designforge/clarification.json` and `prompts/clarification-latest.md` as durable evidence before `brief.json`.
+- Propagated clarification evidence into the design brief, generation prompt, run records, handoff README, and export bundle.
+- Fixed Windows verification command reliability by resolving `node.exe` from common install locations instead of relying only on the GUI process PATH.
+- Fixed Windows Codex `os error 206` long-command failures by writing full prompts to `.designforge/codex-prompts/latest.md` and passing a short file-read instruction to `codex exec`.
+- Fixed Windows Codex `workspace-write` sandbox process-launch failures (`CreateProcessAsUserW failed: 5`) by starting Codex runs with `danger-full-access` on Windows.
+- Forced Windows Codex runs to prefer PowerShell 7 (`pwsh.exe`) through `windows.shell_path` and PATH prepending, avoiding Windows PowerShell 5.1 command-launch failures.
+- Expanded `새 디자인 시작` so it clears the prior design system, generated screen, generated styles, manifests, chat, and run history instead of only resetting the Codex session.
+- Preserved the original request after preflight failure so a follow-up like "진행해" continues from the original long request instead of replacing it.
+- Re-verified workspace TypeScript/Vite commands, TypeScript, frontend build, Rust check, Clippy, Knip, and Tauri release packaging.
+- Latest release build after the `os error 206` fix completed on 2026-07-05 14:40 +09:00.
 
 ## Principles
 
 - Design quality comes before feature count.
-- Keep the default generation loop lightweight: request, brief, design-system grounding, Codex generation, anchors, run record.
+- Keep the default generation loop evidence-driven: request, AI preflight clarification, brief, design-system grounding, Codex generation, anchors, run record.
 - Keep verification, preview, screenshot capture, critique, quality audit, and export explicitly user-triggered.
 - Preserve targeted-edit discipline: small requests should not cause broad redesigns.
 - Store durable evidence in workspace files so later turns improve from prior context.
@@ -35,13 +49,15 @@ Completion evidence:
 - README lists heavy stages as manual actions.
 - development.md describes the current quality-first staged architecture.
 
-### 2. Design Brief Layer
+### 2. AI Clarification And Design Brief Layer
 
 Status: completed.
 
-Before compiling the Codex prompt, write `.designforge/brief.json` with request classification, generation mode, assumptions, likely audience, design quality bar, questions to consider, and references to context/design-system health.
+Before compiling the Codex prompt, run AI preflight and write `.designforge/clarification.json`, then write `.designforge/brief.json` with request classification, generation mode, assumptions, likely audience, design quality bar, questions to consider, and references to context/design-system health.
 
 Completion evidence:
+- `.designforge/clarification.json` is created from Codex preflight before questions.
+- Questions come from the AI preflight manifest, not hardcoded UI lists.
 - `.designforge/brief.json` is created during each design run.
 - `prompts/latest.md` includes the design brief.
 - The UI exposes generation mode: guided or variations.

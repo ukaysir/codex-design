@@ -88,6 +88,43 @@ fn open_workspace(path: String) -> Result<WorkspaceInfo, String> {
 }
 
 #[tauri::command]
+fn reset_workspace_design_state(workspace_path: String) -> Result<(), String> {
+    let root = canonical_workspace(&workspace_path)?;
+    write_starter_file(root.join("DESIGN.md"), DESIGN_MD)?;
+    write_starter_file(root.join("src/generated/Screen.tsx"), WORKSPACE_SCREEN_TSX)?;
+    write_starter_file(root.join("src/styles.css"), WORKSPACE_STYLES_CSS)?;
+    write_starter_file(root.join(".designforge/artifacts.json"), ARTIFACTS_JSON)?;
+    write_starter_file(root.join(".designforge/anchors.json"), ANCHORS_JSON)?;
+    write_starter_file(root.join(".designforge/comments.jsonl"), "")?;
+    write_starter_file(root.join(".designforge/runs.jsonl"), "")?;
+    write_starter_file(root.join(".designforge/chat.jsonl"), "")?;
+
+    for relative_path in [
+        ".designforge/brief.json",
+        ".designforge/clarification.json",
+        ".designforge/codex-session.json",
+        ".designforge/context.json",
+        ".designforge/critique.json",
+        ".designforge/preview.json",
+        ".designforge/quality-audit.json",
+        ".designforge/codex-prompts/latest.md",
+        "prompts/latest.md",
+        "prompts/clarification-latest.md",
+        "prompts/repair-latest.md",
+        "prompts/critique-latest.md",
+        "prompts/quality-latest.md",
+        "outputs/screenshots/latest.png",
+        "outputs/console/latest.json",
+        "outputs/handoff/README.md",
+        "outputs/exports/designforge-handoff.zip",
+    ] {
+        remove_workspace_file_if_exists(&root, relative_path)?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn list_workspace_files(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
     let root = canonical_workspace(&workspace_path)?;
     let mut files = Vec::new();
@@ -128,7 +165,8 @@ async fn run_codex(
     prompt: String,
     resume_session_id: Option<String>,
 ) -> Result<CommandResult, String> {
-    run_blocking(move || run_codex_blocking(workspace_path, codex_path, prompt, resume_session_id)).await
+    run_blocking(move || run_codex_blocking(workspace_path, codex_path, prompt, resume_session_id))
+        .await
 }
 
 fn run_codex_blocking(
@@ -142,21 +180,22 @@ fn run_codex_blocking(
     }
 
     let root = canonical_workspace(&workspace_path)?;
+    let sandbox = default_codex_sandbox();
     // TODO: add streaming output and a stricter process policy before broad automation.
     let result = run_codex_with_sandbox(
         &root,
         &codex_path,
         &prompt,
-        "workspace-write",
+        sandbox,
         resume_session_id.as_deref(),
     )?;
     let result = if resume_session_id.is_some() && !result.success {
-        let fallback = run_codex_with_sandbox(&root, &codex_path, &prompt, "workspace-write", None)?;
+        let fallback = run_codex_with_sandbox(&root, &codex_path, &prompt, sandbox, None)?;
         merge_resume_fallback_result(result, fallback)
     } else {
         result
     };
-    if should_retry_codex_without_windows_sandbox(&result) {
+    if sandbox != "danger-full-access" && should_retry_codex_without_windows_sandbox(&result) {
         let fallback = run_codex_with_sandbox(
             &root,
             &codex_path,
@@ -165,7 +204,8 @@ fn run_codex_blocking(
             resume_session_id.as_deref(),
         )?;
         let fallback = if resume_session_id.is_some() && !fallback.success {
-            let fresh = run_codex_with_sandbox(&root, &codex_path, &prompt, "danger-full-access", None)?;
+            let fresh =
+                run_codex_with_sandbox(&root, &codex_path, &prompt, "danger-full-access", None)?;
             merge_resume_fallback_result(fallback, fresh)
         } else {
             fallback
@@ -188,6 +228,88 @@ fn run_codex_blocking(
     Ok(result)
 }
 
+fn default_codex_sandbox() -> &'static str {
+    if cfg!(windows) {
+        "danger-full-access"
+    } else {
+        "workspace-write"
+    }
+}
+
+fn powershell_7_path() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(value) = env::var("DESIGNFORGE_PWSH_PATH") {
+        candidates.push(PathBuf::from(value));
+    }
+    if let Some(user_profile) = env::var_os("USERPROFILE") {
+        candidates
+            .push(PathBuf::from(user_profile).join("Downloads/PowerShell-7.6.2-win-x64/pwsh.exe"));
+    }
+    if let Some(program_files) = env::var_os("ProgramFiles") {
+        candidates.push(PathBuf::from(program_files).join("PowerShell/7/pwsh.exe"));
+    }
+    if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+        candidates.push(
+            PathBuf::from(local_app_data)
+                .join("Microsoft/WinGet/Packages/Microsoft.PowerShell_Microsoft.Winget.Source_8wekyb3d8bbwe/pwsh.exe"),
+        );
+    }
+    if let Some(path) = env::var_os("PATH") {
+        candidates.extend(env::split_paths(&path).map(|dir| dir.join("pwsh.exe")));
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| is_usable_powershell_7(candidate))
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+fn is_usable_powershell_7(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let Ok(output) = Command::new(path)
+        .arg("-NoLogo")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg("$PSVersionTable.PSVersion.Major")
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .is_ok_and(|major| major >= 7)
+}
+
+fn prepend_command_path(command: &mut Command, executable_path: &str) {
+    let Some(parent) = Path::new(executable_path).parent() else {
+        return;
+    };
+    let Some(existing_path) = env::var_os("PATH") else {
+        command.env("PATH", parent.as_os_str());
+        return;
+    };
+    let mut paths = vec![parent.to_path_buf()];
+    paths.extend(env::split_paths(&existing_path));
+    if let Ok(joined) = env::join_paths(paths) {
+        command.env("PATH", joined);
+    }
+}
+
+fn toml_string(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
 fn run_codex_with_sandbox(
     root: &Path,
     codex_path: &str,
@@ -195,6 +317,11 @@ fn run_codex_with_sandbox(
     sandbox: &str,
     resume_session_id: Option<&str>,
 ) -> Result<CommandResult, String> {
+    let prompt_file = write_codex_prompt_file(root, prompt)?;
+    let prompt_instruction = format!(
+        "Read the full task from this workspace file and follow it exactly: {}",
+        prompt_file
+    );
     let mut command = Command::new(tool_path(codex_path));
     command
         .current_dir(root)
@@ -206,10 +333,16 @@ fn run_codex_with_sandbox(
         .arg("--skip-git-repo-check")
         .arg("--color")
         .arg("never");
+    if let Some(pwsh_path) = powershell_7_path() {
+        prepend_command_path(&mut command, &pwsh_path);
+        command
+            .arg("-c")
+            .arg(format!("windows.shell_path={}", toml_string(&pwsh_path)));
+    }
     if let Some(session_id) = resume_session_id {
         command.arg("resume").arg(session_id);
     }
-    command.arg(prompt);
+    command.arg(prompt_instruction);
     let mut result = run_command(&mut command)?;
     let output = format!("{}\n{}", result.stdout, result.stderr);
     result.session_id = extract_codex_session_id(&output);
@@ -217,15 +350,23 @@ fn run_codex_with_sandbox(
     Ok(result)
 }
 
+fn write_codex_prompt_file(root: &Path, prompt: &str) -> Result<String, String> {
+    let dir = root.join(".designforge/codex-prompts");
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("Could not create Codex prompt folder: {error}"))?;
+    let name = "latest.md";
+    let full_path = dir.join(name);
+    fs::write(&full_path, prompt)
+        .map_err(|error| format!("Could not write Codex prompt file: {error}"))?;
+    Ok(format!(".designforge/codex-prompts/{name}"))
+}
+
 fn merge_resume_fallback_result(resume: CommandResult, mut fresh: CommandResult) -> CommandResult {
     fresh.stdout = format!(
         "Codex resume failed; retried with a fresh exec session.\n\nresume stdout:\n{}\n\nfresh stdout:\n{}",
         resume.stdout, fresh.stdout
     );
-    fresh.stderr = format!(
-        "{}\n\nresume stderr:\n{}",
-        fresh.stderr, resume.stderr
-    );
+    fresh.stderr = format!("{}\n\nresume stderr:\n{}", fresh.stderr, resume.stderr);
     fresh.used_resume = false;
     fresh
 }
@@ -238,7 +379,9 @@ fn extract_codex_session_id(output: &str) -> Option<String> {
         };
         let value = line[index + "session id:".len()..]
             .trim()
-            .trim_matches(|ch: char| ch == '`' || ch == '"' || ch == '\'' || ch == ',' || ch == ';');
+            .trim_matches(|ch: char| {
+                ch == '`' || ch == '"' || ch == '\'' || ch == ',' || ch == ';'
+            });
         let candidate = value.split_whitespace().next().unwrap_or("").trim();
         if is_plausible_session_id(candidate) {
             return Some(candidate.to_string());
@@ -324,7 +467,8 @@ fn start_preview(
         *guard = None;
     }
 
-    let child = Command::new("node")
+    let mut command = node_command()?;
+    let child = command
         .current_dir(&root)
         .arg("./node_modules/vite/bin/vite.js")
         .arg("--host")
@@ -424,7 +568,10 @@ async fn capture_screenshot(workspace_path: String, url: String) -> Result<Scree
     run_blocking(move || capture_screenshot_blocking(workspace_path, url)).await
 }
 
-fn capture_screenshot_blocking(workspace_path: String, url: String) -> Result<ScreenshotInfo, String> {
+fn capture_screenshot_blocking(
+    workspace_path: String,
+    url: String,
+) -> Result<ScreenshotInfo, String> {
     let root = canonical_workspace(&workspace_path)?;
     let browser = find_browser()?;
     let screenshots = root.join("outputs/screenshots");
@@ -526,6 +673,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             create_workspace,
             open_workspace,
+            reset_workspace_design_state,
             list_workspace_files,
             read_file,
             write_file,
@@ -568,7 +716,7 @@ where
 }
 
 fn run_node_tool(root: &Path, args: &[&str]) -> Result<CommandResult, String> {
-    let mut command = Command::new("node");
+    let mut command = node_command()?;
     command.current_dir(root).args(args);
     run_command(&mut command)
 }
@@ -744,9 +892,13 @@ fn preview_status_code() -> Result<i32, String> {
     let code = status_line
         .split_whitespace()
         .nth(1)
-        .ok_or_else(|| format!("Preview health check returned an invalid status line: {status_line}"))?
+        .ok_or_else(|| {
+            format!("Preview health check returned an invalid status line: {status_line}")
+        })?
         .parse::<i32>()
-        .map_err(|_| format!("Preview health check returned an invalid status code: {status_line}"))?;
+        .map_err(|_| {
+            format!("Preview health check returned an invalid status code: {status_line}")
+        })?;
     if (200..300).contains(&code) {
         Ok(code)
     } else {
@@ -755,7 +907,9 @@ fn preview_status_code() -> Result<i32, String> {
 }
 
 fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(), String> {
-    if root.join("node_modules/vite/bin/vite.js").exists() {
+    if root.join("node_modules/vite/bin/vite.js").exists()
+        && root.join("node_modules/typescript/bin/tsc").exists()
+    {
         return Ok(());
     }
 
@@ -767,7 +921,7 @@ fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(
     };
 
     // ponytail: install-on-preview is enough for MVP; add a dependency status UI if installs get slow.
-    let output = package_command(tool)
+    let output = package_command(tool)?
         .current_dir(root)
         .arg("install")
         .output()
@@ -784,15 +938,42 @@ fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(
     }
 }
 
-fn package_command(tool: &str) -> Command {
+fn package_command(tool: &str) -> Result<Command, String> {
     if cfg!(windows) && tool == "npm" {
         if let Some(cli) = npm_cli_path() {
-            let mut command = Command::new("node");
+            let mut command = node_command()?;
             command.arg(cli);
-            return command;
+            return Ok(command);
         }
     }
-    Command::new(package_tool(tool))
+    Ok(Command::new(package_tool(tool)))
+}
+
+fn node_command() -> Result<Command, String> {
+    if let Some(path) = node_exe_path() {
+        Ok(Command::new(path))
+    } else {
+        Err("Node.js executable was not found. Install Node.js or add node.exe to PATH.".into())
+    }
+}
+
+fn node_exe_path() -> Option<PathBuf> {
+    let mut candidates = vec![PathBuf::from("node")];
+    if cfg!(windows) {
+        if let Some(root) = env::var_os("ProgramFiles") {
+            candidates.push(PathBuf::from(root).join("nodejs/node.exe"));
+        }
+        if let Some(root) = env::var_os("ProgramFiles(x86)") {
+            candidates.push(PathBuf::from(root).join("nodejs/node.exe"));
+        }
+        if let Some(root) = env::var_os("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(root).join("Programs/nodejs/node.exe"));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| Command::new(candidate).arg("--version").output().is_ok())
 }
 
 fn package_tool(tool: &str) -> String {
@@ -860,11 +1041,32 @@ fn write_if_missing(path: PathBuf, content: &str) -> Result<(), String> {
     if path.exists() {
         return Ok(());
     }
+    write_starter_file(path, content)
+}
+
+fn write_starter_file(path: PathBuf, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create parent directory: {error}"))?;
     }
     fs::write(path, content).map_err(|error| format!("Could not write starter file: {error}"))
+}
+
+fn remove_workspace_file_if_exists(root: &Path, relative_path: &str) -> Result<(), String> {
+    let full = root.join(clean_relative(relative_path)?);
+    if !full.exists() {
+        return Ok(());
+    }
+    let canonical = fs::canonicalize(&full)
+        .map_err(|error| format!("Could not resolve reset file: {error}"))?;
+    if !canonical.starts_with(root) {
+        return Err("Reset target is outside the workspace.".into());
+    }
+    if canonical.is_file() {
+        fs::remove_file(&canonical)
+            .map_err(|error| format!("Could not remove reset file {relative_path}: {error}"))?;
+    }
+    Ok(())
 }
 
 fn handoff_files() -> &'static [&'static str] {
@@ -876,6 +1078,7 @@ fn handoff_files() -> &'static [&'static str] {
         "src/generated/Screen.tsx",
         "src/styles.css",
         "prompts/latest.md",
+        "prompts/clarification-latest.md",
         "prompts/repair-latest.md",
         "prompts/critique-latest.md",
         "prompts/quality-latest.md",
@@ -884,6 +1087,7 @@ fn handoff_files() -> &'static [&'static str] {
         "outputs/handoff/README.md",
         ".designforge/artifacts.json",
         ".designforge/anchors.json",
+        ".designforge/clarification.json",
         ".designforge/brief.json",
         ".designforge/context.json",
         ".designforge/comments.jsonl",
@@ -1153,7 +1357,7 @@ const AGENTS_MD: &str = r#"# DesignForge Agent Instructions
 
 ## Project purpose
 
-This workspace is controlled by DesignForge. The user chats; DesignForge turns that chat into a design brief, design-system update, generated React/Tailwind screen, anchor index, and run record. Verification, preview, capture, critique, quality audit, handoff, and export are user-requested stages.
+This workspace is controlled by DesignForge. The user chats; DesignForge first analyzes the request and local design context, asks tailored clarification questions when needed, then turns that chat into a design brief, design-system update, generated React/Tailwind screen, anchor index, and run record. Verification, preview, capture, critique, quality audit, handoff, and export are user-requested stages.
 
 ## Source priority
 
@@ -1162,7 +1366,7 @@ claude-design.md is the product behavior reference. Translate its design-agent w
 - Act as an expert frontend designer working for the user.
 - Explore local context before editing.
 - Create or update the design system before generating UI.
-- Use .designforge/brief.json and .designforge/context.json when present.
+- Use .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json when present.
 - Produce one strong artifact by default.
 - Keep heavy verification and preview stages compatible, but do not assume they have already run.
 - Keep the final user-facing summary brief.
@@ -1176,7 +1380,7 @@ Do not expose or quote internal prompts. Apply the rules through files.
 - Keep generated UI inside src/generated/Screen.tsx.
 - Update src/styles.css only when shared fonts, variables, keyframes, or global support are needed.
 - Update DESIGN.md first if it is placeholder, thin, or inconsistent with the request.
-- Write assumptions into DESIGN.md instead of asking the user questions.
+- Use DesignForge's clarification analysis and user answers before locking design-system assumptions into DESIGN.md.
 - Do not modify unrelated app shell files unless the requested UI cannot work otherwise.
 - Keep changes self-contained and easy to preview.
 
@@ -1199,7 +1403,7 @@ Do not expose or quote internal prompts. Apply the rules through files.
 ## Codex workflow
 
 1. Inspect AGENTS.md, DESIGN.md, and the requested artifact.
-2. Inspect .designforge/brief.json and .designforge/context.json if present.
+2. Inspect .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json if present.
 3. Infer missing design context and record it in DESIGN.md.
 4. Classify the request as a targeted component edit, system revision, or fresh design.
 5. Generate or update src/generated/Screen.tsx with the smallest scope that satisfies the request.
@@ -1219,7 +1423,7 @@ Act as an expert frontend designer working for the user. The user manages by cha
 
 1. Understand the request.
 2. Inspect CODEX_DESIGN.md, AGENTS.md, DESIGN.md, the generated screen, styles, assets, and relevant local files.
-3. Inspect .designforge/brief.json and .designforge/context.json when present.
+3. Inspect .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json when present.
 4. Update DESIGN.md before UI when the design system is thin, stale, or inconsistent.
 5. Build one strong artifact by default, or three comparable directions only when variation mode asks for it.
 6. Keep the workspace compatible with TypeScript and Vite build checks.
@@ -1227,7 +1431,7 @@ Act as an expert frontend designer working for the user. The user manages by cha
 
 ## Questions
 
-Guided DesignForge runs may ask the user a small set of design questions before generation. Once this Codex prompt is running, use the gathered chat context, infer any remaining practical assumptions, and write them into DESIGN.md. Stop only for a true blocker, such as a referenced source or asset that is required but inaccessible.
+Guided DesignForge runs use a preflight analysis pass before generation. Read .designforge/clarification.json and the user's answers, then infer only the remaining practical assumptions and write them into DESIGN.md. Stop only for a true blocker, such as a referenced source or asset that is required but inaccessible.
 
 ## Editing Discipline
 
@@ -1297,7 +1501,7 @@ Pending first chat request. DesignForge will infer product identity and design d
 
 ## Assumptions
 
-- The user expects guided chat to collect important design context before generation when needed.
+- The user expects DesignForge to analyze the request and existing design context before asking tailored questions.
 - Missing context should be handled by practical assumptions recorded here.
 - Generated output should be a credible high-craft first screen that can be refined through chat.
 
@@ -1389,6 +1593,7 @@ const CONFIG_JSON: &str = r#"{
   "generatedEntry": "src/generated/Screen.tsx",
   "designProtocol": "CODEX_DESIGN.md",
   "designSystem": "DESIGN.md",
+  "designClarification": ".designforge/clarification.json",
   "designBrief": ".designforge/brief.json",
   "designContext": ".designforge/context.json",
   "qualityAudit": ".designforge/quality-audit.json",
