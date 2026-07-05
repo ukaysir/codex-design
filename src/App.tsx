@@ -274,7 +274,7 @@ function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+        "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
         variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_8px_18px_rgba(49,130,246,0.18)] hover:bg-[var(--primary-strong)]",
         variant === "secondary" &&
           "border border-[var(--line-strong)] bg-white text-[var(--ink)] hover:border-[var(--accent)] hover:bg-white hover:text-[var(--accent)]",
@@ -3793,7 +3793,6 @@ ${effectiveRequest}`;
     () => messages.filter((message) => !isActivityMessage(message)),
     [messages],
   );
-  const historyCount = activityMessages.length + runHistory.length;
   const activeProject = projects.find((project) => project.path === workspacePath);
   const activeProjectName = activeProject?.name || (workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : "프로젝트 없음");
   const filteredProjects = useMemo(() => {
@@ -4070,8 +4069,8 @@ ${effectiveRequest}`;
                     ))}
                   </div>
                 ) : null}
-                <div data-comment-anchor="primary-action" className="mt-2 flex items-center justify-between gap-2">
-                  <div className="flex gap-1.5">
+                <div data-comment-anchor="primary-action" className="mt-2 flex min-w-0 items-center justify-between gap-1.5">
+                  <div className="flex min-w-0 shrink-0 gap-1.5">
                     <input
                       id="designforge-attachments"
                       type="file"
@@ -4086,7 +4085,7 @@ ${effectiveRequest}`;
                     <Button
                       type="button"
                       variant="secondary"
-                      className="min-h-7 px-3 text-[11px]"
+                      className="h-8 min-h-8 w-8 shrink-0 px-0 text-[var(--ink)]"
                       onClick={() => {
                         const imageRequest = input.trim() || "DesignForge에서 사용할 이미지를 생성하세요.";
                         const attachments = pendingAttachments;
@@ -4095,39 +4094,41 @@ ${effectiveRequest}`;
                       }}
                       disabled={busy || (!input.trim() && pendingAttachments.length === 0)}
                       title="Codex $imagegen으로 이미지 에셋을 생성합니다."
+                      aria-label="이미지 생성"
                     >
-                      <ImageIcon size={12} />
-                      이미지
+                      <ImageIcon size={14} />
                     </Button>
                     <Button
                       type="button"
                       variant="secondary"
-                      className="min-h-7 px-3 text-[11px]"
+                      className="h-8 min-h-8 w-8 shrink-0 px-0 text-[var(--ink)]"
                       onClick={() => document.getElementById("designforge-attachments")?.click()}
                       disabled={busy}
+                      title="파일 첨부"
+                      aria-label="파일 첨부"
                     >
-                      <Paperclip size={12} />
-                      파일
+                      <Paperclip size={14} />
                     </Button>
                   </div>
-                  <div className="flex justify-end gap-2">
-                  <Button
-                    variant="secondary"
-                    className="min-h-7 px-3 text-[11px]"
-                    onClick={() => {
-                      setInput("");
-                      setGuidedDraft(null);
-                      setPendingAttachments([]);
-                    }}
-                    disabled={busy || (!input && !guidedDraft && pendingAttachments.length === 0)}
-                    aria-label="입력 비우기"
-                  >
-                    비우기
-                  </Button>
-                  <Button variant="primary" onClick={runChat} disabled={busy || (!input.trim() && pendingAttachments.length === 0)} className="min-h-7 px-3 text-[11px]">
-                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                    {guidedDraft ? "답변 보내기" : "보내기"}
-                  </Button>
+                  <div className="flex min-w-0 justify-end gap-1.5">
+                    <Button
+                      variant="secondary"
+                      className="h-8 min-h-8 w-8 shrink-0 px-0 text-[var(--ink)]"
+                      onClick={() => {
+                        setInput("");
+                        setGuidedDraft(null);
+                        setPendingAttachments([]);
+                      }}
+                      disabled={busy || (!input && !guidedDraft && pendingAttachments.length === 0)}
+                      title="입력 비우기"
+                      aria-label="입력 비우기"
+                    >
+                      <X size={14} />
+                    </Button>
+                    <Button variant="primary" onClick={runChat} disabled={busy || (!input.trim() && pendingAttachments.length === 0)} className="h-8 min-h-8 shrink-0 px-3 text-[11px]">
+                      {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                      <span>{guidedDraft ? "답변" : "보내기"}</span>
+                    </Button>
                   </div>
                 </div>
               </div>
