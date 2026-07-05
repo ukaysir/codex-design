@@ -3153,7 +3153,7 @@ ${request}`;
           />
           <aside
             data-comment-anchor="project-list"
-            className="fixed bottom-16 left-4 top-4 z-30 flex w-[410px] min-h-0 flex-col overflow-y-auto rounded-[24px] border border-[var(--line)] bg-white px-5 py-5 shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
+            className="fixed bottom-16 left-4 top-4 z-30 flex w-[410px] min-h-0 flex-col overflow-y-auto overflow-x-hidden rounded-[24px] border border-[var(--line)] bg-white px-5 py-5 shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -3195,7 +3195,7 @@ ${request}`;
                     key={project.path}
                     type="button"
                     className={cn(
-                      "w-full rounded-xl border p-4 text-left transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                      "w-full min-w-0 overflow-hidden rounded-xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] focus:ring-inset",
                       active
                         ? "border-[var(--primary)] bg-blue-50"
                         : "border-[var(--line)] bg-white hover:border-[var(--primary)] hover:bg-[var(--panel-2)]",
@@ -3203,15 +3203,19 @@ ${request}`;
                     onClick={() => void switchProject(project.path)}
                     disabled={busy}
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-[var(--ink-strong)]">{project.name}</p>
                         <p className="mt-1 truncate font-mono text-xs text-[var(--muted)]">{truncatePath(project.path)}</p>
                       </div>
-                      <Badge tone={active ? "cyan" : "steel"}>{active ? "현재" : formatProjectTime(project.updatedAt)}</Badge>
+                      <span className="max-w-[112px] shrink-0 overflow-hidden">
+                        <Badge tone={active ? "cyan" : "steel"}>{active ? "현재" : formatProjectTime(project.updatedAt)}</Badge>
+                      </span>
                     </div>
                     {project.lastMessage ? (
-                      <p className="mt-3 line-clamp-2 text-xs leading-5 text-[var(--charcoal)]">{project.lastMessage}</p>
+                      <p className="mt-3 line-clamp-2 break-words text-xs leading-5 text-[var(--charcoal)] [overflow-wrap:anywhere]">
+                        {project.lastMessage}
+                      </p>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Badge tone="steel">chat {project.chatCount}</Badge>
