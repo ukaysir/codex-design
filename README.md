@@ -19,7 +19,8 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 - Context manifest at `.designforge/context.json`
 - Generation modes: guided clarification and three-variation exploration
 - Component-level edit flow through preview click selection or anchor-list selection with `@anchor` and `<mentioned-element>` context
-- Codex CLI check and `codex exec` runner
+- Codex CLI check, `codex app-server` wrapper runner, live event stream, and `codex exec` fallback
+- Codex runtime, model, and reasoning effort controls in the pipeline panel
 - Codex prompt handoff through `.designforge/codex-prompts/latest.md` to avoid Windows command-line length failures
 - Manual generated workspace verification
 - Manual one-pass repair for failed verification
@@ -88,6 +89,16 @@ codex --version
 ```
 
 The app defaults to `codex` as the CLI path. Codex runs with:
+
+```txt
+codex app-server
+```
+
+DesignForge uses Codex app-server as the default runtime so the desktop app can control Codex through the local JSON-RPC protocol and receive streamed turn events such as `turn/started`, `item/agentMessage/delta`, and `turn/completed`. The pipeline panel exposes the runtime selector. Choose `app-server` for the integrated chat-like wrapper path, or `exec` to use the older blocking runner.
+
+The same panel also controls model and reasoning effort. Leave both blank to use the Codex CLI defaults, or set values such as `gpt-5.5` and `high`/`xhigh`. The app-server path sends these as `model` and `effort` turn fields; the exec fallback sends `--model` and `-c model_reasoning_effort=...`.
+
+The fallback runner still uses:
 
 ```txt
 codex exec -C <workspace> --sandbox workspace-write --skip-git-repo-check
@@ -210,7 +221,7 @@ Verified generated outputs:
 - Preview click editing depends on generated elements carrying `data-comment-anchor`; unanchored elements can still be edited through chat but are not directly selectable.
 - Screenshot capture requires Microsoft Edge or Chrome headless CLI.
 - Console capture requires Microsoft Edge or Chrome headless CLI.
-- Codex output is captured after completion, not streamed.
+- Codex app-server output streams into the workbench; the exec fallback is still captured after completion.
 - File commands are workspace-scoped.
 
 ## Next Steps

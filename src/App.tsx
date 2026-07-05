@@ -17,6 +17,7 @@ import {
   Terminal,
   XCircle,
 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -33,6 +34,9 @@ import type {
   AnchorInfo,
   AnchorManifest,
   CommentRecord,
+  CodexAppServerEvent,
+  CodexEffort,
+  CodexRuntime,
   CommandResult,
   ConsoleInfo,
   CritiqueManifest,
@@ -59,6 +63,9 @@ const DEFAULT_SETTINGS: Settings = {
   defaultWorkspaceDir: "",
   defaultProjectRootDir: "",
   codexPath: "codex",
+  codexRuntime: "app-server",
+  codexModel: "",
+  codexEffort: "",
   packageManager: "npm",
   lastWorkspacePath: "",
 };
@@ -148,6 +155,19 @@ type CodexSessionManifest = {
   lastUsedResume?: boolean;
 };
 
+type CodexStreamState = {
+  runId: string;
+  status: "idle" | "running" | "completed" | "error";
+  text: string;
+  eventCount: number;
+  method?: string;
+  threadId?: string | null;
+  turnId?: string | null;
+};
+
+const CODEX_MODEL_OPTIONS = ["", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"] as const;
+const CODEX_EFFORT_OPTIONS: CodexEffort[] = ["", "minimal", "low", "medium", "high", "xhigh"];
+
 const START_STEPS: PipelineStep[] = [
   { id: "context", label: "Context", detail: "Create or open the workspace", status: "idle" },
   { id: "design", label: "Design system", detail: "Infer DESIGN.md from the chat", status: "idle" },
@@ -184,6 +204,24 @@ function cn(...classes: Array<string | false | undefined>) {
 
 function textFromError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isCodexAppServerEvent(value: unknown): value is CodexAppServerEvent {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<CodexAppServerEvent>;
+  return typeof candidate.runId === "string" && typeof candidate.method === "string";
+}
+
+function cleanSettingValue(value: string) {
+  return value.trim() || null;
+}
+
+function completedAgentText(event: CodexAppServerEvent) {
+  if (event.method !== "item/completed" || !event.params || typeof event.params !== "object") return null;
+  const item = (event.params as { item?: unknown }).item;
+  if (!item || typeof item !== "object") return null;
+  const candidate = item as { type?: unknown; text?: unknown };
+  return candidate.type === "agentMessage" && typeof candidate.text === "string" ? candidate.text : null;
 }
 
 function now() {
@@ -621,6 +659,12 @@ export default function App() {
   const [latestBrief, setLatestBrief] = useState<DesignBriefManifest | null>(null);
   const [latestContext, setLatestContext] = useState<DesignContextManifest | null>(null);
   const [latestClarification, setLatestClarification] = useState<DesignClarificationManifest | null>(null);
+  const [codexStream, setCodexStream] = useState<CodexStreamState>({
+    runId: "",
+    status: "idle",
+    text: "",
+    eventCount: 0,
+  });
   const projectRootPath = settings.defaultProjectRootDir || DEFAULT_PROJECT_ROOT;
 
   const visibleFiles = useMemo(
@@ -725,6 +769,47 @@ export default function App() {
       }
     })();
   }, [workspacePath]);
+
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
+
+    void listen<CodexAppServerEvent>("codex-app-server-event", (event) => {
+      const payload = event.payload;
+      if (!isCodexAppServerEvent(payload)) return;
+      setCodexStream((current) => {
+        if (current.runId && current.runId !== payload.runId) return current;
+        const completedText = completedAgentText(payload);
+        const text = completedText ?? (payload.delta ? `${current.text}${payload.delta}` : current.text);
+        const status =
+          payload.method === "error"
+            ? "error"
+            : payload.method === "turn/completed"
+              ? "completed"
+              : current.status === "idle"
+                ? "running"
+                : current.status;
+
+        return {
+          runId: payload.runId,
+          status,
+          text,
+          eventCount: current.eventCount + 1,
+          method: payload.method,
+          threadId: payload.threadId ?? current.threadId,
+          turnId: payload.turnId ?? current.turnId,
+        };
+      });
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup = unlisten;
+    });
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, []);
 
   useEffect(() => {
     void refreshProjects();
@@ -1643,12 +1728,34 @@ export default function App() {
 
   async function runCodexPrompt(path: string, prompt: string, label: string) {
     const session = await loadCodexSession(path);
-    const result = await callTauri<CommandResult>("run_codex", {
+    const model = cleanSettingValue(settings.codexModel);
+    const effort = cleanSettingValue(settings.codexEffort);
+    const runtime = settings.codexRuntime || "app-server";
+    const args = {
       workspacePath: path,
       codexPath: settings.codexPath,
       prompt,
       resumeSessionId: session?.sessionId ?? null,
-    });
+      model,
+      effort,
+    };
+    let result: CommandResult;
+    if (runtime === "app-server") {
+      const runId = crypto.randomUUID();
+      setCodexStream({ runId, status: "running", text: "", eventCount: 0 });
+      try {
+        result = await callTauri<CommandResult>("run_codex_app_server", { ...args, runId });
+      } catch (error) {
+        setCodexStream((current) =>
+          current.runId === runId ? { ...current, status: "error", method: "designforge/fallback" } : current,
+        );
+        pushLog("error", `Codex app-server unavailable; retrying with codex exec: ${textFromError(error)}`);
+        result = await callTauri<CommandResult>("run_codex", args);
+      }
+    } else {
+      setCodexStream({ runId: "", status: "idle", text: "", eventCount: 0 });
+      result = await callTauri<CommandResult>("run_codex", args);
+    }
     pushCommandResult(label, result);
     await saveCodexSession(path, result, label);
     if (!result.success) throw new Error(`${label} failed.`);
@@ -2535,6 +2642,9 @@ ${request}`;
   const selectedAnchor = anchors.find((anchor) => anchor.id === selectedAnchorId);
   const selectedAnchorLabel = selectedAnchorId || "선택 없음";
   const codexSessionLabel = codexSession?.sessionId ? shortSessionId(codexSession.sessionId) : "fresh";
+  const codexRuntime = settings.codexRuntime || "app-server";
+  const codexModelLabel = settings.codexModel.trim() || "CLI default";
+  const codexEffortLabel = settings.codexEffort || "auto";
   const visibleArtifacts = visibleFiles.length ? visibleFiles : [{ relativePath: ARTIFACT_PATH, isDirectory: false }];
   const verifyStepStatus = steps.find((step) => step.id === "verify")?.status ?? "idle";
   const qualityStepStatus = steps.find((step) => step.id === "quality")?.status ?? "idle";
@@ -2750,6 +2860,18 @@ ${request}`;
                   {conversationMessages.slice(-60).map((message) => (
                     <ChatRow key={message.id} message={message} />
                   ))}
+                  {codexRuntime === "app-server" && codexStream.status === "running" ? (
+                    <ChatRow
+                      message={{
+                        id: `codex-stream-${codexStream.runId}`,
+                        role: "assistant",
+                        content: codexStream.text || "Codex app-server가 요청을 처리하고 있습니다.",
+                        createdAt: new Date().toISOString(),
+                        kind: "tool",
+                        level: "info",
+                      }}
+                    />
+                  ) : null}
                 </div>
               </div>
 
@@ -3020,7 +3142,7 @@ ${request}`;
                         {message.content}
                       </p>
                       ))}
-                    {busy && <p>codex exec · generating workspace artifact...</p>}
+                    {busy && <p>codex {codexRuntime} · generating workspace artifact...</p>}
                   </div>
                 </div>
               </div>
@@ -3139,6 +3261,91 @@ ${request}`;
             </Button>
           </div>
         </div>
+
+        <section data-comment-anchor="codex-wrapper" className="mt-5 rounded-[22px] border border-[var(--line)] bg-white p-4 shadow-[0_12px_30px_rgba(31,41,55,0.04)]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--primary)]">codex wrapper</p>
+              <h2 className="mt-1 truncate text-xl font-bold tracking-normal text-[var(--ink-strong)]">앱 내 Codex 제어</h2>
+            </div>
+            <Badge tone={codexRuntime === "app-server" ? "lime" : "steel"}>{codexRuntime}</Badge>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {(["app-server", "exec"] as CodexRuntime[]).map((runtime) => (
+              <button
+                key={runtime}
+                type="button"
+                onClick={() => patchSettings({ codexRuntime: runtime })}
+                disabled={busy}
+                className={cn(
+                  "min-h-9 rounded-xl border px-3 text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                  codexRuntime === runtime
+                    ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+                    : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)] hover:border-[var(--primary)]",
+                )}
+              >
+                {runtime}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            <label className="grid gap-1 text-xs font-medium text-[var(--ink)]" htmlFor="codex-model">
+              Model
+              <input
+                id="codex-model"
+                list="codex-model-options"
+                value={settings.codexModel}
+                onChange={(event) => patchSettings({ codexModel: event.target.value })}
+                className="min-h-10 rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] px-3 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+                placeholder="CLI default"
+                disabled={busy}
+              />
+              <datalist id="codex-model-options">
+                {CODEX_MODEL_OPTIONS.filter(Boolean).map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
+            </label>
+
+            <label className="grid gap-1 text-xs font-medium text-[var(--ink)]" htmlFor="codex-effort">
+              Effort
+              <select
+                id="codex-effort"
+                value={settings.codexEffort}
+                onChange={(event) => patchSettings({ codexEffort: event.target.value as CodexEffort })}
+                className="min-h-10 rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] px-3 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+                disabled={busy}
+              >
+                {CODEX_EFFORT_OPTIONS.map((effort) => (
+                  <option key={effort || "auto"} value={effort}>
+                    {effort || "auto"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs leading-5 text-[var(--muted)]">
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">session {codexSessionLabel}</span>
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">model {codexModelLabel}</span>
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">effort {codexEffortLabel}</span>
+            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">events {codexStream.eventCount}</span>
+          </div>
+
+          {codexRuntime === "app-server" && (codexStream.status !== "idle" || codexStream.text) ? (
+            <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-dark)] p-3 text-white">
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                <span className="font-medium">{codexStream.status}</span>
+                <span className="truncate font-mono text-[var(--on-dark-muted)]">{codexStream.method || "app-server"}</span>
+              </div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-white">
+                {codexStream.text || "Codex app-server connected..."}
+              </pre>
+            </div>
+          ) : null}
+        </section>
 
         <section data-comment-anchor="feature-list" className="mt-5 rounded-[22px] border border-[var(--line)] bg-white shadow-[0_12px_30px_rgba(31,41,55,0.04)]">
           <div className="border-b border-[var(--line)] p-4">

@@ -158,6 +158,12 @@ Claude Design의 프로젝트는 파일 시스템과 persistent instructions를 
 - 10-lens design loop:
   `prompt-template.ts`, `DESIGN.md` seed, starter workspace `DESIGN.md`, health gate, preflight prompt, quality audit prompt에 10개 품질 렌즈를 반영했다.
 
+- Codex app-server wrapper:
+  `codex app-server`를 실제 로컬 CLI에서 검증했고 `initialize -> thread/start -> turn/start -> item/agentMessage/delta -> turn/completed` 이벤트 흐름이 동작함을 확인했다. DesignForge는 이제 기본 Codex runtime으로 app-server를 사용하고, 문제가 있으면 기존 `codex exec` runner로 fallback한다.
+
+- Codex model/effort control:
+  파이프라인 패널에서 runtime, model, reasoning effort를 설정할 수 있다. app-server 경로는 `model`/`effort` 필드로, exec fallback은 `--model`과 `model_reasoning_effort` config override로 전달한다.
+
 ## 아직 부족한 점
 
 - 프로젝트 이름을 사용자가 직접 입력하는 UI가 없다. 지금은 “Untitled DesignForge Project” 또는 첫 요청 기반 이름으로 생성된다.
@@ -166,6 +172,7 @@ Claude Design의 프로젝트는 파일 시스템과 persistent instructions를 
 - `DESIGN.md`의 token/component inventory를 자동으로 구조화된 JSON으로 뽑지는 않는다.
 - 자동 시각 검증은 manual action이다. 품질은 prompt/audit으로 강화됐지만, 기본 생성 뒤 즉시 screenshot verifier가 도는 구조는 아니다.
 - 단순 source splice edit가 없어 작은 copy/color 수정도 Codex 경로를 탈 수 있다.
+- app-server 프로세스는 현재 실행 단위로 띄우고 종료한다. 장기 상주 thread controller, interrupt/steer 버튼, approval UI는 다음 단계다.
 
 ## 다음 업그레이드 제안
 

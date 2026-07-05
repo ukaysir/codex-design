@@ -1,5 +1,7 @@
 export type LogLevel = "info" | "success" | "error";
 export type GenerationMode = "guided" | "variations";
+export type CodexRuntime = "app-server" | "exec";
+export type CodexEffort = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type LogEvent = {
   id: string;
@@ -35,6 +37,15 @@ export type CommandResult = {
   stderr: string;
   sessionId?: string | null;
   usedResume?: boolean;
+};
+
+export type CodexAppServerEvent = {
+  runId: string;
+  method: string;
+  params: unknown;
+  delta?: string | null;
+  threadId?: string | null;
+  turnId?: string | null;
 };
 
 export type PreviewInfo = {
@@ -227,6 +238,9 @@ export type Settings = {
   defaultWorkspaceDir: string;
   defaultProjectRootDir: string;
   codexPath: string;
+  codexRuntime: CodexRuntime;
+  codexModel: string;
+  codexEffort: CodexEffort;
   packageManager: "npm" | "pnpm" | "bun";
   lastWorkspacePath: string;
 };

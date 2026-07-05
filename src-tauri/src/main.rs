@@ -1,17 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::{
     env, fs,
-    io::{Read, Seek, Write},
+    io::{BufRead, BufReader, Read, Seek, Write},
     net::TcpStream,
     path::{Component, Path, PathBuf},
-    process::{Child, Command, Stdio},
-    sync::Mutex,
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::State;
+use tauri::{Emitter, State};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +49,27 @@ struct CommandResult {
     stderr: String,
     session_id: Option<String>,
     used_resume: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CodexAppServerEvent {
+    run_id: String,
+    method: String,
+    params: Value,
+    delta: Option<String>,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+}
+
+#[derive(Default)]
+struct CodexAppServerRunState {
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    response_text: String,
+    completed: bool,
+    failed_message: Option<String>,
+    event_count: usize,
 }
 
 #[derive(Serialize)]
@@ -232,9 +254,46 @@ async fn run_codex(
     codex_path: String,
     prompt: String,
     resume_session_id: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
 ) -> Result<CommandResult, String> {
-    run_blocking(move || run_codex_blocking(workspace_path, codex_path, prompt, resume_session_id))
-        .await
+    run_blocking(move || {
+        run_codex_blocking(
+            workspace_path,
+            codex_path,
+            prompt,
+            resume_session_id,
+            model,
+            effort,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn run_codex_app_server(
+    app: tauri::AppHandle,
+    workspace_path: String,
+    codex_path: String,
+    prompt: String,
+    resume_session_id: Option<String>,
+    run_id: String,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<CommandResult, String> {
+    run_blocking(move || {
+        run_codex_app_server_blocking(
+            app,
+            workspace_path,
+            codex_path,
+            prompt,
+            resume_session_id,
+            run_id,
+            model,
+            effort,
+        )
+    })
+    .await
 }
 
 fn run_codex_blocking(
@@ -242,6 +301,8 @@ fn run_codex_blocking(
     codex_path: String,
     prompt: String,
     resume_session_id: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
 ) -> Result<CommandResult, String> {
     if prompt.trim().is_empty() {
         return Err("Prompt is empty.".into());
@@ -256,9 +317,19 @@ fn run_codex_blocking(
         &prompt,
         sandbox,
         resume_session_id.as_deref(),
+        model.as_deref(),
+        effort.as_deref(),
     )?;
     let result = if resume_session_id.is_some() && !result.success {
-        let fallback = run_codex_with_sandbox(&root, &codex_path, &prompt, sandbox, None)?;
+        let fallback = run_codex_with_sandbox(
+            &root,
+            &codex_path,
+            &prompt,
+            sandbox,
+            None,
+            model.as_deref(),
+            effort.as_deref(),
+        )?;
         merge_resume_fallback_result(result, fallback)
     } else {
         result
@@ -270,10 +341,19 @@ fn run_codex_blocking(
             &prompt,
             "danger-full-access",
             resume_session_id.as_deref(),
+            model.as_deref(),
+            effort.as_deref(),
         )?;
         let fallback = if resume_session_id.is_some() && !fallback.success {
-            let fresh =
-                run_codex_with_sandbox(&root, &codex_path, &prompt, "danger-full-access", None)?;
+            let fresh = run_codex_with_sandbox(
+                &root,
+                &codex_path,
+                &prompt,
+                "danger-full-access",
+                None,
+                model.as_deref(),
+                effort.as_deref(),
+            )?;
             merge_resume_fallback_result(fallback, fresh)
         } else {
             fallback
@@ -384,6 +464,8 @@ fn run_codex_with_sandbox(
     prompt: &str,
     sandbox: &str,
     resume_session_id: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<CommandResult, String> {
     let prompt_file = write_codex_prompt_file(root, prompt)?;
     let prompt_instruction = format!(
@@ -401,6 +483,14 @@ fn run_codex_with_sandbox(
         .arg("--skip-git-repo-check")
         .arg("--color")
         .arg("never");
+    if let Some(model) = clean_optional_cli_value(model) {
+        command.arg("--model").arg(model);
+    }
+    if let Some(effort) = clean_optional_cli_value(effort) {
+        command
+            .arg("-c")
+            .arg(format!("model_reasoning_effort={}", toml_string(effort)));
+    }
     if let Some(pwsh_path) = powershell_7_path() {
         prepend_command_path(&mut command, &pwsh_path);
         command
@@ -416,6 +506,433 @@ fn run_codex_with_sandbox(
     result.session_id = extract_codex_session_id(&output);
     result.used_resume = resume_session_id.is_some();
     Ok(result)
+}
+
+fn clean_optional_cli_value(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn run_codex_app_server_blocking(
+    app: tauri::AppHandle,
+    workspace_path: String,
+    codex_path: String,
+    prompt: String,
+    resume_session_id: Option<String>,
+    run_id: String,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<CommandResult, String> {
+    if prompt.trim().is_empty() {
+        return Err("Prompt is empty.".into());
+    }
+
+    let root = canonical_workspace(&workspace_path)?;
+    let prompt_file = write_codex_prompt_file(&root, &prompt)?;
+    let prompt_instruction = format!(
+        "Read the full task from this workspace file and follow it exactly: {}",
+        prompt_file
+    );
+    let root_string = root.to_string_lossy().to_string();
+    let sandbox = default_codex_sandbox();
+    let model = clean_optional_cli_value(model.as_deref()).map(str::to_string);
+    let effort = clean_optional_cli_value(effort.as_deref()).map(str::to_string);
+
+    let mut command = Command::new(tool_path(&codex_path));
+    command
+        .current_dir(&root)
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(pwsh_path) = powershell_7_path() {
+        prepend_command_path(&mut command, &pwsh_path);
+        command
+            .arg("-c")
+            .arg(format!("windows.shell_path={}", toml_string(&pwsh_path)));
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Could not start Codex app-server: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture Codex app-server stdout.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Could not capture Codex app-server stderr.".to_string())?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Could not open Codex app-server stdin.".to_string())?;
+
+    let stderr_buffer = Arc::new(Mutex::new(String::new()));
+    let stderr_target = Arc::clone(&stderr_buffer);
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut buffer = String::new();
+        let _ = reader.read_to_string(&mut buffer);
+        if !buffer.is_empty() {
+            if let Ok(mut target) = stderr_target.lock() {
+                target.push_str(&buffer);
+            }
+        }
+    });
+
+    let mut reader = BufReader::new(stdout);
+    let mut state = CodexAppServerRunState::default();
+    let mut next_id = 1_u64;
+
+    emit_codex_status(&app, &run_id, "Codex app-server starting");
+    codex_rpc_request(
+        &mut reader,
+        &mut stdin,
+        &mut next_id,
+        "initialize",
+        json!({
+            "clientInfo": {
+                "name": "designforge",
+                "title": "DesignForge",
+                "version": env!("CARGO_PKG_VERSION")
+            },
+            "capabilities": { "experimentalApi": true }
+        }),
+        &app,
+        &run_id,
+        &mut state,
+    )?;
+    write_json_line(&mut stdin, &json!({ "method": "initialized", "params": {} }))?;
+
+    let mut used_resume = false;
+    let thread_result = if let Some(session_id) = resume_session_id.as_deref() {
+        used_resume = true;
+        let mut params = codex_thread_params(&root_string, sandbox, model.as_deref());
+        params["threadId"] = json!(session_id);
+        match codex_rpc_request(
+            &mut reader,
+            &mut stdin,
+            &mut next_id,
+            "thread/resume",
+            params,
+            &app,
+            &run_id,
+            &mut state,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                used_resume = false;
+                emit_codex_status(
+                    &app,
+                    &run_id,
+                    &format!("Codex app-server resume failed; starting a fresh thread: {error}"),
+                );
+                codex_rpc_request(
+                    &mut reader,
+                    &mut stdin,
+                    &mut next_id,
+                    "thread/start",
+                    codex_thread_params(&root_string, sandbox, model.as_deref()),
+                    &app,
+                    &run_id,
+                    &mut state,
+                )?
+            }
+        }
+    } else {
+        codex_rpc_request(
+            &mut reader,
+            &mut stdin,
+            &mut next_id,
+            "thread/start",
+            codex_thread_params(&root_string, sandbox, model.as_deref()),
+            &app,
+            &run_id,
+            &mut state,
+        )?
+    };
+
+    state.thread_id =
+        json_path_string(&thread_result, &["thread", "id"]).or_else(|| state.thread_id.clone());
+    let Some(thread_id) = state.thread_id.clone() else {
+        let _ = child.kill();
+        return Err("Codex app-server did not return a thread id.".into());
+    };
+    emit_codex_status(
+        &app,
+        &run_id,
+        &format!("Codex app-server thread {}", short_for_log(&thread_id)),
+    );
+
+    let turn_result = codex_rpc_request(
+        &mut reader,
+        &mut stdin,
+        &mut next_id,
+        "turn/start",
+        codex_turn_params(
+            &root_string,
+            &thread_id,
+            &prompt_instruction,
+            model.as_deref(),
+            effort.as_deref(),
+        ),
+        &app,
+        &run_id,
+        &mut state,
+    )?;
+    state.turn_id =
+        json_path_string(&turn_result, &["turn", "id"]).or_else(|| state.turn_id.clone());
+
+    while !state.completed && state.failed_message.is_none() {
+        let message = codex_read_json_message(&mut reader)?;
+        handle_codex_app_server_message(&message, &app, &run_id, &mut state);
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let stderr_text = stderr_buffer
+        .lock()
+        .map(|value| value.clone())
+        .unwrap_or_default();
+    let stdout = format!(
+        "Codex app-server thread: {}\nCodex app-server turn: {}\nEvents: {}\n\n{}",
+        state.thread_id.as_deref().unwrap_or("unknown"),
+        state.turn_id.as_deref().unwrap_or("unknown"),
+        state.event_count,
+        state.response_text.trim()
+    )
+    .trim()
+    .to_string();
+
+    if let Some(error) = state.failed_message {
+        return Ok(CommandResult {
+            success: false,
+            code: Some(1),
+            stdout,
+            stderr: format!("{error}\n{stderr_text}").trim().to_string(),
+            session_id: state.thread_id,
+            used_resume,
+        });
+    }
+
+    Ok(CommandResult {
+        success: state.completed,
+        code: Some(0),
+        stdout,
+        stderr: stderr_text,
+        session_id: state.thread_id,
+        used_resume,
+    })
+}
+
+fn codex_thread_params(root: &str, sandbox: &str, model: Option<&str>) -> Value {
+    let mut params = json!({
+        "cwd": root,
+        "sandbox": sandbox
+    });
+    if let Some(model) = clean_optional_cli_value(model) {
+        params["model"] = json!(model);
+    }
+    params
+}
+
+fn codex_turn_params(
+    root: &str,
+    thread_id: &str,
+    prompt_instruction: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Value {
+    let mut params = json!({
+        "threadId": thread_id,
+        "cwd": root,
+        "input": [
+            { "type": "text", "text": prompt_instruction }
+        ]
+    });
+    if let Some(model) = clean_optional_cli_value(model) {
+        params["model"] = json!(model);
+    }
+    if let Some(effort) = clean_optional_cli_value(effort) {
+        params["effort"] = json!(effort);
+    }
+    params
+}
+
+fn codex_rpc_request(
+    reader: &mut BufReader<ChildStdout>,
+    stdin: &mut ChildStdin,
+    next_id: &mut u64,
+    method: &str,
+    params: Value,
+    app: &tauri::AppHandle,
+    run_id: &str,
+    state: &mut CodexAppServerRunState,
+) -> Result<Value, String> {
+    let id = *next_id;
+    *next_id += 1;
+    write_json_line(
+        stdin,
+        &json!({
+            "id": id,
+            "method": method,
+            "params": params
+        }),
+    )?;
+
+    loop {
+        let message = codex_read_json_message(reader)?;
+        if message.get("id").and_then(Value::as_u64) == Some(id) {
+            if let Some(error) = message.get("error") {
+                return Err(format!(
+                    "Codex app-server {method} failed: {}",
+                    compact_json(error)
+                ));
+            }
+            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+        }
+        handle_codex_app_server_message(&message, app, run_id, state);
+        if let Some(error) = state.failed_message.as_deref() {
+            return Err(error.to_string());
+        }
+    }
+}
+
+fn write_json_line(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> {
+    let line = serde_json::to_string(value)
+        .map_err(|error| format!("Could not serialize Codex app-server request: {error}"))?;
+    stdin
+        .write_all(line.as_bytes())
+        .map_err(|error| format!("Could not write Codex app-server request: {error}"))?;
+    stdin
+        .write_all(b"\n")
+        .map_err(|error| format!("Could not finish Codex app-server request: {error}"))?;
+    stdin
+        .flush()
+        .map_err(|error| format!("Could not flush Codex app-server request: {error}"))
+}
+
+fn codex_read_json_message(reader: &mut BufReader<ChildStdout>) -> Result<Value, String> {
+    let mut line = String::new();
+    let bytes = reader
+        .read_line(&mut line)
+        .map_err(|error| format!("Could not read Codex app-server response: {error}"))?;
+    if bytes == 0 {
+        return Err("Codex app-server closed stdout before the turn completed.".into());
+    }
+    serde_json::from_str(line.trim())
+        .map_err(|error| format!("Codex app-server returned invalid JSON: {error}: {line}"))
+}
+
+fn handle_codex_app_server_message(
+    message: &Value,
+    app: &tauri::AppHandle,
+    run_id: &str,
+    state: &mut CodexAppServerRunState,
+) {
+    let Some(method) = message.get("method").and_then(Value::as_str) else {
+        return;
+    };
+    let params = message.get("params").cloned().unwrap_or(Value::Null);
+    state.event_count += 1;
+
+    let thread_id = json_path_string(&params, &["threadId"])
+        .or_else(|| json_path_string(&params, &["thread", "id"]));
+    let turn_id = json_path_string(&params, &["turnId"])
+        .or_else(|| json_path_string(&params, &["turn", "id"]));
+    if let Some(thread_id) = thread_id.clone() {
+        state.thread_id = Some(thread_id);
+    }
+    if let Some(turn_id) = turn_id.clone() {
+        state.turn_id = Some(turn_id);
+    }
+
+    let delta = if method == "item/agentMessage/delta" {
+        params
+            .get("delta")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string())
+    } else {
+        None
+    };
+    if let Some(delta) = delta.as_deref() {
+        state.response_text.push_str(delta);
+    }
+
+    if method == "item/completed"
+        && params
+            .get("item")
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str)
+            == Some("agentMessage")
+    {
+        if let Some(text) = params
+            .get("item")
+            .and_then(|item| item.get("text"))
+            .and_then(Value::as_str)
+        {
+            state.response_text = text.to_string();
+        }
+    }
+
+    if method == "error" {
+        state.failed_message = Some(
+            params
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Codex app-server emitted an error.")
+                .to_string(),
+        );
+    }
+
+    if method == "turn/completed" {
+        state.completed = true;
+        if let Some(error) = params
+            .get("turn")
+            .and_then(|turn| turn.get("error"))
+            .filter(|error| !error.is_null())
+        {
+            state.failed_message = Some(format!("Codex turn completed with error: {}", compact_json(error)));
+        }
+    }
+
+    let event = CodexAppServerEvent {
+        run_id: run_id.to_string(),
+        method: method.to_string(),
+        params,
+        delta,
+        thread_id,
+        turn_id,
+    };
+    let _ = app.emit("codex-app-server-event", event);
+}
+
+fn emit_codex_status(app: &tauri::AppHandle, run_id: &str, message: &str) {
+    let event = CodexAppServerEvent {
+        run_id: run_id.to_string(),
+        method: "designforge/status".into(),
+        params: json!({ "message": message }),
+        delta: None,
+        thread_id: None,
+        turn_id: None,
+    };
+    let _ = app.emit("codex-app-server-event", event);
+}
+
+fn json_path_string(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current.as_str().map(|value| value.to_string())
+}
+
+fn compact_json(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn short_for_log(value: &str) -> String {
+    value.chars().take(8).collect()
 }
 
 fn write_codex_prompt_file(root: &Path, prompt: &str) -> Result<String, String> {
@@ -749,6 +1266,7 @@ fn main() {
             write_file,
             check_codex,
             run_codex,
+            run_codex_app_server,
             verify_workspace,
             start_preview,
             stop_preview,
