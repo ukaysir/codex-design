@@ -1,4 +1,5 @@
 export type LogLevel = "info" | "success" | "error";
+export type GenerationMode = "guided" | "variations";
 
 export type LogEvent = {
   id: string;
@@ -83,6 +84,52 @@ export type CritiqueManifest = {
   error?: string;
 };
 
+export type DesignSystemHealth = {
+  score: number;
+  status: "strong" | "needs-detail" | "thin";
+  missingSections: string[];
+  weakSignals: string[];
+  checkedAt: string;
+};
+
+export type DesignContextManifest = {
+  updatedAt: string;
+  assetFiles: string[];
+  styleFiles: string[];
+  sourceFiles: string[];
+  generatedArtifactExists: boolean;
+  anchorCount: number;
+  notes: string[];
+};
+
+export type DesignBriefManifest = {
+  updatedAt: string;
+  request: string;
+  mode: GenerationMode;
+  classification: "targeted-edit" | "system-revision" | "fresh-design";
+  audienceAssumption: string;
+  purposeAssumption: string;
+  qualityBar: string[];
+  questionsToConsider: string[];
+  assumptions: string[];
+  designSystemHealth: DesignSystemHealth;
+  contextPath: string;
+};
+
+export type QualityAuditManifest = {
+  status: "ready" | "applied" | "failed" | "no-evidence" | "no-change";
+  updatedAt: string;
+  promptPath: string;
+  manifestPath: string;
+  artifactPath: string;
+  briefPath?: string;
+  contextPath?: string;
+  screenshotPath?: string;
+  consolePath?: string;
+  verificationPassed?: boolean;
+  error?: string;
+};
+
 export type RunRecord = {
   id: string;
   request: string;
@@ -99,9 +146,14 @@ export type RunRecord = {
   consoleWarningCount?: number;
   anchorManifestPath?: string;
   anchorCount?: number;
+  briefPath?: string;
+  contextPath?: string;
   critiqueStatus?: CritiqueManifest["status"];
   critiquePromptPath?: string;
   critiqueManifestPath?: string;
+  qualityAuditStatus?: QualityAuditManifest["status"];
+  qualityAuditPromptPath?: string;
+  qualityAuditManifestPath?: string;
   previewUrl?: string;
   previewStatus?: PreviewManifest["status"];
   codexExitCode: number | null;

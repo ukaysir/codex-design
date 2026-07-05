@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   buildCritiquePrompt,
   buildDesignSystemSeed,
+  buildQualityAuditPrompt,
   buildRepairPrompt,
   buildStructuredPrompt,
 } from "./lib/prompt-template";
@@ -30,11 +31,16 @@ import type {
   CommandResult,
   ConsoleInfo,
   CritiqueManifest,
+  DesignBriefManifest,
+  DesignContextManifest,
+  DesignSystemHealth,
   ExportInfo,
+  GenerationMode,
   LogEvent,
   LogLevel,
   PreviewInfo,
   PreviewManifest,
+  QualityAuditManifest,
   RunRecord,
   ScreenshotInfo,
   Settings,
@@ -54,9 +60,13 @@ const DEFAULT_WORKSPACE = "designforge-workspace";
 const RUNS_PATH = ".designforge/runs.jsonl";
 const CHAT_PATH = ".designforge/chat.jsonl";
 const CODEX_SESSION_PATH = ".designforge/codex-session.json";
+const BRIEF_PATH = ".designforge/brief.json";
+const CONTEXT_PATH = ".designforge/context.json";
+const QUALITY_AUDIT_PATH = ".designforge/quality-audit.json";
 const PROMPT_PATH = "prompts/latest.md";
 const REPAIR_PROMPT_PATH = "prompts/repair-latest.md";
 const CRITIQUE_PROMPT_PATH = "prompts/critique-latest.md";
+const QUALITY_PROMPT_PATH = "prompts/quality-latest.md";
 const CRITIQUE_MANIFEST_PATH = ".designforge/critique.json";
 const ANCHORS_PATH = ".designforge/anchors.json";
 const HANDOFF_PATH = "outputs/handoff/README.md";
@@ -99,8 +109,15 @@ type PreviewSelection = {
   path: string[];
 };
 
+type GuidedDraft = {
+  request: string;
+  questions: string[];
+  createdAt: string;
+};
+
 type RunRequestOptions = {
   displayRequest?: string;
+  recordRequest?: string;
   commentNote?: string;
   anchorId?: string;
   screenLabel?: string;
@@ -124,6 +141,7 @@ const NAV_ITEMS: Array<{ key: NavKey; label: string; anchor: string }> = [
 const START_STEPS: PipelineStep[] = [
   { id: "context", label: "Context", detail: "Create or open the workspace", status: "idle" },
   { id: "design", label: "Design system", detail: "Infer DESIGN.md from the chat", status: "idle" },
+  { id: "brief", label: "Brief", detail: "Write design brief and context manifest", status: "idle" },
   { id: "prompt", label: "Prompt", detail: "Compile the Codex Design brief", status: "idle" },
   { id: "codex", label: "Codex", detail: "Run the local Codex CLI", status: "idle" },
   { id: "artifact", label: "Artifact", detail: "Refresh generated files", status: "idle" },
@@ -133,6 +151,7 @@ const START_STEPS: PipelineStep[] = [
   { id: "screenshot", label: "Screenshot", detail: "Manual preview evidence capture", status: "idle" },
   { id: "console", label: "Console", detail: "Manual runtime console capture", status: "idle" },
   { id: "critique", label: "Critique", detail: "Manual screenshot-driven critique pass", status: "idle" },
+  { id: "quality", label: "Quality", detail: "Manual design quality audit pass", status: "idle" },
   { id: "handoff", label: "Handoff", detail: "Manual implementation handoff notes", status: "idle" },
   { id: "export", label: "Export", detail: "Manual package handoff files", status: "idle" },
 ];
@@ -167,7 +186,7 @@ function createIntroMessages(): ChatMessage[] {
       id: "intro",
       role: "assistant",
       content:
-        "DesignForge에게 요청하면 Codex 대화 세션을 이어서 실제 앱 파일을 변경합니다. 검증, 프리뷰, 캡처, 크리틱, export는 오른쪽 작업 버튼으로 필요할 때만 실행합니다.",
+        "만들고 싶은 화면을 말해 주세요. 기본 흐름에서는 먼저 필요한 질문을 하고, 답변까지 묶어 실제 앱 파일을 변경합니다. 필요하면 3안 비교 생성을 선택할 수 있습니다.",
       createdAt: now(),
       kind: "summary",
       level: "info",
@@ -296,6 +315,158 @@ ${note}
 Apply this as a small component-level revision. Preserve the current DESIGN.md visual system, the existing screen, unrelated layout, spacing, typography, colors, copy, data-screen-label, and all data-comment-anchor values. If the selected anchor is not the right source location, make the narrowest safe edit and explain the assumption in DESIGN.md. Do not regenerate the whole screen unless the user explicitly asks for a fresh design.`;
 }
 
+const DESIGN_HEALTH_SECTIONS = [
+  "Purpose",
+  "Tone",
+  "Differentiation",
+  "Visual Foundations",
+  "Quality Bar",
+  "Component Inventory",
+  "Revision Rules",
+  "Content Rules",
+  "Implementation Rules",
+];
+
+const WEAK_DESIGN_SIGNALS = [
+  "Pending first chat request",
+  "Define the product",
+  "Pick a specific direction",
+  "Name the one visual",
+  "real assets used or needed",
+  "Track the semantic regions",
+  "Describe the product",
+  "Define the visual mood",
+];
+
+function sectionBody(markdown: string, section: string) {
+  const escaped = section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = markdown.match(new RegExp(`(^|\\n)## ${escaped}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "i"));
+  return match?.[2]?.trim() ?? "";
+}
+
+function inspectDesignSystem(markdown: string): DesignSystemHealth {
+  const checkedAt = new Date().toISOString();
+  const trimmed = markdown.trim();
+  if (!trimmed) {
+    return {
+      score: 0,
+      status: "thin",
+      missingSections: DESIGN_HEALTH_SECTIONS,
+      weakSignals: ["DESIGN.md is empty"],
+      checkedAt,
+    };
+  }
+
+  const missingSections: string[] = [];
+  const weakSignals: string[] = [];
+  let score = 10;
+
+  for (const section of DESIGN_HEALTH_SECTIONS) {
+    const body = sectionBody(markdown, section);
+    if (!body) {
+      missingSections.push(section);
+      continue;
+    }
+
+    const hasWeakPlaceholder = WEAK_DESIGN_SIGNALS.some((signal) => body.includes(signal));
+    if (body.length < 80 || hasWeakPlaceholder) {
+      weakSignals.push(`${section} needs concrete detail`);
+      score += 5;
+    } else {
+      score += 10;
+    }
+  }
+
+  if (/#[0-9a-f]{6}/i.test(markdown) || markdown.includes("oklch(") || markdown.includes("rgb(")) score += 5;
+  if (/font|type|typography|서체|폰트/i.test(markdown)) score += 5;
+  if (/data-comment-anchor|anchor/i.test(markdown)) score += 5;
+  if (/motion|animation|transition|reduced-motion|모션/i.test(markdown)) score += 5;
+
+  const capped = Math.max(0, Math.min(100, score));
+  return {
+    score: capped,
+    status: capped >= 80 ? "strong" : capped >= 55 ? "needs-detail" : "thin",
+    missingSections,
+    weakSignals,
+    checkedAt,
+  };
+}
+
+function classifyRequestForBrief(request: string): DesignBriefManifest["classification"] {
+  const lower = request.toLowerCase();
+  if (/@[a-z][a-z0-9-]{1,63}/i.test(request) || request.includes("<mentioned-element>")) return "targeted-edit";
+  if (/(새로|처음부터|new direction|fresh|reset|replace|리디자인|redesign)/i.test(lower)) return "fresh-design";
+  return "system-revision";
+}
+
+function inferAudienceAssumption(request: string) {
+  if (/dashboard|admin|crm|관리자|운영|어드민/i.test(request)) return "Repeated operational users who need dense, scannable controls.";
+  if (/landing|랜딩|marketing|홈페이지|site|website/i.test(request)) return "Prospective users evaluating the product promise in the first viewport.";
+  if (/mobile|app|onboarding|가입|설정/i.test(request)) return "End users completing a focused product flow with low friction.";
+  return "Product users who need a polished, credible interface that matches the request context.";
+}
+
+function inferPurposeAssumption(request: string) {
+  if (/수정|변경|바꿔|edit|fix|adjust/i.test(request)) return "Refine the existing artifact while preserving the current system.";
+  if (/3안|variation|옵션|비교/i.test(request)) return "Explore multiple strong directions before committing to one visual system.";
+  return "Create a focused, high-craft frontend screen that can be iterated through chat.";
+}
+
+function qualityBarForMode(mode: GenerationMode) {
+  const base = [
+    "Primary hierarchy is legible within five seconds.",
+    "The aesthetic direction is specific, not a generic AI SaaS default.",
+    "Every section earns its place; no filler copy or fake metrics.",
+    "Typography, color, spacing, and components behave like a system.",
+    "Text fits, controls are accessible, and anchors are stable.",
+  ];
+  if (mode === "variations") return [...base, "Three directions must be meaningfully different and comparable in one artifact."];
+  if (mode === "guided") return [...base, "Open questions and assumptions must be explicit in DESIGN.md."];
+  return base;
+}
+
+function questionsForMode(mode: GenerationMode, request: string) {
+  const common = [
+    "이 화면을 가장 많이 쓰거나 보게 될 사용자는 누구인가요?",
+    "완성된 화면이 전환, 신뢰, 업무 효율, 탐색, 감성 중 무엇을 가장 우선해야 하나요?",
+    "반드시 따라야 할 브랜드, 레퍼런스, 금지 요소가 있나요?",
+  ];
+  if (mode === "variations") return [...common, "세 방향 중 어떤 기준으로 최종안을 고르면 좋을까요?"];
+  if (/landing|랜딩|website|site/i.test(request)) return [...common, "첫 화면에 꼭 보여야 할 실제 제품 정보, 증거, 이미지가 있나요?"];
+  return [...common, "기존 UI나 자산 중 반드시 기준으로 삼아야 할 것이 있나요?"];
+}
+
+function buildGuidedClarificationMessage(request: string, questions: string[]) {
+  return `좋아요. 바로 생성하기 전에 결과 품질을 높이기 위해 몇 가지만 확인할게요.
+
+요청 요약:
+${request}
+
+${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}
+
+답변을 한 번에 보내면 그 내용을 반영해서 Design Brief와 실제 화면 생성을 진행하겠습니다. 모르는 항목은 "알아서 판단"이라고 적어도 됩니다.`;
+}
+
+function formatBriefForPrompt(brief: DesignBriefManifest) {
+  return JSON.stringify(brief, null, 2);
+}
+
+function formatContextForPrompt(context: DesignContextManifest) {
+  return JSON.stringify(
+    {
+      updatedAt: context.updatedAt,
+      assetFiles: context.assetFiles.slice(0, 30),
+      styleFiles: context.styleFiles.slice(0, 20),
+      sourceFiles: context.sourceFiles.slice(0, 30),
+      generatedArtifactExists: context.generatedArtifactExists,
+      anchorCount: context.anchorCount,
+      notes: context.notes,
+    },
+    null,
+    2,
+  );
+}
+
 export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [workspacePath, setWorkspacePath] = useState(settings.lastWorkspacePath);
@@ -303,6 +474,8 @@ export default function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [activeNav, setActiveNav] = useState<NavKey>("workbench");
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("guided");
+  const [guidedDraft, setGuidedDraft] = useState<GuidedDraft | null>(null);
   const [steps, setSteps] = useState<PipelineStep[]>(START_STEPS);
   const [messages, setMessages] = useState<ChatMessage[]>(createIntroMessages);
   const [logs, setLogs] = useState<LogEvent[]>([
@@ -321,7 +494,10 @@ export default function App() {
   const [manualConsoleInfo, setManualConsoleInfo] = useState<ConsoleInfo | null>(null);
   const [manualScreenshotInfo, setManualScreenshotInfo] = useState<ScreenshotInfo | null>(null);
   const [manualCritique, setManualCritique] = useState<CritiqueManifest | null>(null);
+  const [manualQualityAudit, setManualQualityAudit] = useState<QualityAuditManifest | null>(null);
   const [manualExportPath, setManualExportPath] = useState("");
+  const [latestBrief, setLatestBrief] = useState<DesignBriefManifest | null>(null);
+  const [latestContext, setLatestContext] = useState<DesignContextManifest | null>(null);
 
   const visibleFiles = useMemo(
     () =>
@@ -333,9 +509,13 @@ export default function App() {
             "AGENTS.md",
             CHAT_PATH,
             CODEX_SESSION_PATH,
+            BRIEF_PATH,
+            CONTEXT_PATH,
+            QUALITY_AUDIT_PATH,
             PROMPT_PATH,
             REPAIR_PROMPT_PATH,
             CRITIQUE_PROMPT_PATH,
+            QUALITY_PROMPT_PATH,
             CRITIQUE_MANIFEST_PATH,
             ANCHORS_PATH,
             HANDOFF_PATH,
@@ -380,6 +560,9 @@ export default function App() {
         await loadCodexSession(workspacePath);
         await loadAnchorManifest(workspacePath);
         await loadChatHistory(workspacePath);
+        await loadDesignBrief(workspacePath);
+        await loadDesignContext(workspacePath);
+        await loadQualityAudit(workspacePath);
       } catch (error) {
         pushLog("error", `Could not load workspace state: ${textFromError(error)}`);
       }
@@ -429,6 +612,11 @@ export default function App() {
     return message;
   }
 
+  function selectGenerationMode(mode: GenerationMode) {
+    setGenerationMode(mode);
+    if (mode !== "guided") setGuidedDraft(null);
+  }
+
   async function appendChatMessage(
     path: string,
     role: ChatMessage["role"],
@@ -473,6 +661,42 @@ export default function App() {
       setMessages(records.length ? records.slice(-80) : createIntroMessages());
     } catch {
       setMessages(createIntroMessages());
+    }
+  }
+
+  async function loadDesignBrief(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: BRIEF_PATH });
+      const manifest = JSON.parse(raw) as DesignBriefManifest;
+      setLatestBrief(manifest);
+      return manifest;
+    } catch {
+      setLatestBrief(null);
+      return null;
+    }
+  }
+
+  async function loadDesignContext(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CONTEXT_PATH });
+      const manifest = JSON.parse(raw) as DesignContextManifest;
+      setLatestContext(manifest);
+      return manifest;
+    } catch {
+      setLatestContext(null);
+      return null;
+    }
+  }
+
+  async function loadQualityAudit(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: QUALITY_AUDIT_PATH });
+      const manifest = JSON.parse(raw) as QualityAuditManifest;
+      setManualQualityAudit(manifest);
+      return manifest;
+    } catch {
+      setManualQualityAudit(null);
+      return null;
     }
   }
 
@@ -577,6 +801,7 @@ export default function App() {
     setSelectedAnchorId("");
     setPreviewSelection(null);
     setComponentEdit("");
+    setGuidedDraft(null);
     pushLog("info", "Codex session reset. Next design run will start fresh.");
     await refreshFiles(target);
   }
@@ -679,32 +904,160 @@ export default function App() {
     });
   }
 
-  async function seedDesignSystem(path: string, request: string) {
-    let current = "";
+  async function readDesignSystem(path: string) {
     try {
-      current = await callTauri<string>("read_file", { workspacePath: path, relativePath: "DESIGN.md" });
+      return await callTauri<string>("read_file", { workspacePath: path, relativePath: "DESIGN.md" });
     } catch {
-      current = "";
+      return "";
     }
+  }
+
+  function scaffoldDesignSection(section: string) {
+    const map: Record<string, string> = {
+      Purpose: "Define the product, audience, job-to-be-done, and the screen's role before coding.",
+      Tone: "Commit to a specific aesthetic direction that fits the request instead of a generic default.",
+      Differentiation: "Name the one visual or interaction idea the user should remember.",
+      "Visual Foundations":
+        "- Color: background, surface, text, accent, border, semantic states, and contrast notes.\n- Typography: display/body/mono choices, scale, weights, line-height, and why they fit.\n- Layout: grid, density, spacing rhythm, responsive behavior, and composition rules.\n- Components: buttons, inputs, cards, navigation, feedback, empty states, and repeated patterns.\n- Motion: what moves, why it moves, duration/easing, and reduced-motion behavior.\n- Assets: real assets used or needed; do not invent logos or decorative replacements.",
+      "Quality Bar":
+        "- Strong hierarchy: the primary message and action are obvious within five seconds.\n- Specific aesthetic direction: the design should not read like a generic AI SaaS template.\n- Useful content only: every section earns its place.\n- System continuity: repeated controls, cards, spacing, type, and tone follow the same vocabulary.\n- Implementation fidelity: responsive constraints, readable text, visible focus, and accessible controls.",
+      "Component Inventory":
+        "Track stable semantic regions and keep them aligned with data-comment-anchor values in src/generated/Screen.tsx.",
+      "Revision Rules":
+        "- Continue inside this design system unless the user explicitly asks for a new direction.\n- For a component-level request, edit only the matching anchor's semantic region.\n- Preserve unrelated layout, spacing, typography, color, copy, and anchor ids.",
+      "Content Rules":
+        "- No filler sections or lorem ipsum.\n- No fake metrics unless the request provides real data or asks for sample data.\n- Emoji only when appropriate to the product or provided brand.\n- Copy should match the product tone and stay concise.",
+      "Implementation Rules":
+        "- Main generated screen: src/generated/Screen.tsx.\n- Keep high-level screen roots labelled with data-screen-label.\n- Add stable kebab-case data-comment-anchor values to important semantic regions.\n- Preserve data-comment-anchor values during revisions.\n- Use semantic HTML and accessible controls.\n- Use flex/grid with gap for grouped UI.",
+    };
+    return map[section] ?? "DesignForge should fill this section with concrete guidance during the next design pass.";
+  }
+
+  function enrichDesignSystem(current: string, health: DesignSystemHealth, request: string) {
+    const additions = health.missingSections
+      .map((section) => `## ${section}\n\n${scaffoldDesignSection(section)}`)
+      .join("\n\n");
+    const healthNotes = `## DesignForge Health Notes
+
+- Last request: ${request}
+- Health score before this pass: ${health.score}/100 (${health.status})
+- Missing sections before this pass: ${health.missingSections.length ? health.missingSections.join(", ") : "none"}
+- Weak signals before this pass: ${health.weakSignals.length ? health.weakSignals.join("; ") : "none"}
+- Future Codex runs should replace scaffold language with concrete product-specific decisions.`;
+
+    return [current.trim(), additions, healthNotes].filter(Boolean).join("\n\n");
+  }
+
+  async function prepareDesignSystem(path: string, request: string) {
+    const current = await readDesignSystem(path);
 
     const isLegacySeed =
       current.includes("DesignForge inferred this project") ||
       current.includes("Pending first chat request") ||
       current.includes("Describe the product") ||
       current.includes("Define the visual mood");
-    const looksEmpty = current.trim().length < 900 || isLegacySeed;
+    const health = inspectDesignSystem(current);
 
-    if (!looksEmpty) {
-      pushLog("info", "Existing DESIGN.md kept.");
-      return;
+    if (health.status === "strong" && !isLegacySeed) {
+      pushLog("info", `Existing DESIGN.md kept. Health ${health.score}/100.`);
+      return health;
     }
 
+    const next =
+      health.status === "thin" || isLegacySeed
+        ? buildDesignSystemSeed(request)
+        : enrichDesignSystem(current, health, request);
     await callTauri("write_file", {
       workspacePath: path,
       relativePath: "DESIGN.md",
-      content: buildDesignSystemSeed(request),
+      content: next,
     });
-    pushLog("success", "Seeded DESIGN.md from chat request and claude-design priority.");
+    const nextHealth = inspectDesignSystem(next);
+    pushLog("success", `Updated DESIGN.md quality scaffold. Health ${nextHealth.score}/100.`);
+    return nextHealth;
+  }
+
+  async function writeDesignContextManifest(path: string) {
+    const workspaceFiles = await callTauri<WorkspaceFile[]>("list_workspace_files", { workspacePath: path });
+    const loadedAnchors = anchorManifest ?? (await loadAnchorManifest(path));
+    const artifactExists = workspaceFiles.some((file) => file.relativePath === ARTIFACT_PATH);
+    const assetFiles = workspaceFiles
+      .filter((file) => !file.isDirectory)
+      .map((file) => file.relativePath)
+      .filter((file) => file.startsWith("assets/") || /\.(png|jpe?g|webp|gif|svg|ico|avif|ttf|otf|woff2?)$/i.test(file))
+      .slice(0, 80);
+    const styleFiles = workspaceFiles
+      .filter((file) => !file.isDirectory)
+      .map((file) => file.relativePath)
+      .filter((file) => /\.(css|scss|sass|less|cjs|mjs|config\.js|config\.ts)$/i.test(file) || file.includes("tailwind"))
+      .slice(0, 80);
+    const sourceFiles = workspaceFiles
+      .filter((file) => !file.isDirectory)
+      .map((file) => file.relativePath)
+      .filter((file) => file.startsWith("src/") && /\.(tsx?|jsx?)$/i.test(file))
+      .slice(0, 100);
+    const notes = [
+      assetFiles.length ? `${assetFiles.length} local asset files available.` : "No local assets found; avoid inventing logos or fake imagery.",
+      styleFiles.length ? `${styleFiles.length} style/config files available.` : "No shared style files found beyond defaults.",
+      artifactExists ? `${ARTIFACT_PATH} exists.` : `${ARTIFACT_PATH} is missing and should be created.`,
+      loadedAnchors?.anchors.length ? `${loadedAnchors.anchors.length} comment anchors indexed.` : "No anchors indexed yet.",
+    ];
+    const manifest: DesignContextManifest = {
+      updatedAt: new Date().toISOString(),
+      assetFiles,
+      styleFiles,
+      sourceFiles,
+      generatedArtifactExists: artifactExists,
+      anchorCount: loadedAnchors?.anchors.length ?? 0,
+      notes,
+    };
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: CONTEXT_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    pushLog("success", `Wrote context manifest: ${CONTEXT_PATH}`);
+    return manifest;
+  }
+
+  async function writeDesignBriefManifest(
+    path: string,
+    request: string,
+    mode: GenerationMode,
+    designSystemHealth: DesignSystemHealth,
+    context: DesignContextManifest,
+  ) {
+    const classification = classifyRequestForBrief(request);
+    const assumptions = [
+      inferAudienceAssumption(request),
+      inferPurposeAssumption(request),
+      context.assetFiles.length
+        ? "Use available local assets when they match the requested surface."
+        : "No local assets were found, so the design should avoid invented brand marks and fake imagery.",
+      designSystemHealth.status === "strong"
+        ? "The existing design system is strong enough to preserve."
+        : "The design system needs concrete decisions during this run.",
+    ];
+    const manifest: DesignBriefManifest = {
+      updatedAt: new Date().toISOString(),
+      request,
+      mode,
+      classification,
+      audienceAssumption: inferAudienceAssumption(request),
+      purposeAssumption: inferPurposeAssumption(request),
+      qualityBar: qualityBarForMode(mode),
+      questionsToConsider: questionsForMode(mode, request),
+      assumptions,
+      designSystemHealth,
+      contextPath: CONTEXT_PATH,
+    };
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: BRIEF_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    pushLog("success", `Wrote design brief: ${BRIEF_PATH}`);
+    return manifest;
   }
 
   function buildFeedbackContext(records: CommentRecord[]) {
@@ -752,9 +1105,22 @@ export default function App() {
     return manifest;
   }
 
-  async function writePrompt(path: string, request: string) {
+  async function writePrompt(
+    path: string,
+    request: string,
+    brief: DesignBriefManifest,
+    context: DesignContextManifest,
+  ) {
     const feedbackContext = buildFeedbackContext(await loadComments(path));
-    const prompt = buildStructuredPrompt(request, { artifactPath: ARTIFACT_PATH, feedbackContext });
+    const prompt = buildStructuredPrompt(request, {
+      artifactPath: ARTIFACT_PATH,
+      feedbackContext,
+      briefPath: BRIEF_PATH,
+      contextPath: CONTEXT_PATH,
+      briefContext: formatBriefForPrompt(brief),
+      contextSummary: formatContextForPrompt(context),
+      generationMode: brief.mode,
+    });
     await callTauri("write_file", {
       workspacePath: path,
       relativePath: PROMPT_PATH,
@@ -812,6 +1178,55 @@ export default function App() {
       relativePath: CRITIQUE_MANIFEST_PATH,
       content: JSON.stringify(manifest, null, 2),
     });
+  }
+
+  async function saveQualityAuditManifest(path: string, manifest: QualityAuditManifest) {
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: QUALITY_AUDIT_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    setManualQualityAudit(manifest);
+  }
+
+  async function readQualityAuditManifest(path: string) {
+    const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: QUALITY_AUDIT_PATH });
+    return JSON.parse(raw) as QualityAuditManifest;
+  }
+
+  async function writeQualityAuditPrompt(
+    path: string,
+    request: string,
+    screenshot: ScreenshotInfo | null,
+    consoleInfo: ConsoleInfo | null,
+  ) {
+    const prompt = buildQualityAuditPrompt(request, screenshot?.relativePath ?? null, {
+      artifactPath: ARTIFACT_PATH,
+      briefPath: BRIEF_PATH,
+      contextPath: CONTEXT_PATH,
+      qualityAuditPath: QUALITY_AUDIT_PATH,
+      consolePath: consoleInfo?.relativePath,
+    });
+    const manifest: QualityAuditManifest = {
+      status: screenshot || consoleInfo ? "ready" : "no-evidence",
+      updatedAt: new Date().toISOString(),
+      promptPath: QUALITY_PROMPT_PATH,
+      manifestPath: QUALITY_AUDIT_PATH,
+      artifactPath: ARTIFACT_PATH,
+      briefPath: BRIEF_PATH,
+      contextPath: CONTEXT_PATH,
+      screenshotPath: screenshot?.relativePath,
+      consolePath: consoleInfo?.relativePath,
+    };
+
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: QUALITY_PROMPT_PATH,
+      content: prompt,
+    });
+    await saveQualityAuditManifest(path, manifest);
+    pushLog("success", `Prepared quality audit input: ${QUALITY_PROMPT_PATH}`);
+    return manifest;
   }
 
   async function snapshotGeneratedFiles(path: string): Promise<FileSnapshot> {
@@ -935,10 +1350,28 @@ export default function App() {
     critique: CritiqueManifest | null,
   ) {
     let designSystem = "";
+    let designBrief = "";
+    let designContext = "";
+    let qualityAudit = "";
     try {
       designSystem = await callTauri<string>("read_file", { workspacePath: path, relativePath: "DESIGN.md" });
     } catch {
       designSystem = "DESIGN.md was unavailable when the handoff was created.";
+    }
+    try {
+      designBrief = await callTauri<string>("read_file", { workspacePath: path, relativePath: BRIEF_PATH });
+    } catch {
+      designBrief = "";
+    }
+    try {
+      designContext = await callTauri<string>("read_file", { workspacePath: path, relativePath: CONTEXT_PATH });
+    } catch {
+      designContext = "";
+    }
+    try {
+      qualityAudit = await callTauri<string>("read_file", { workspacePath: path, relativePath: QUALITY_AUDIT_PATH });
+    } catch {
+      qualityAudit = "";
     }
     const verificationStatus = verifyResult.stdout === "Verification not requested."
       ? "not requested"
@@ -961,6 +1394,18 @@ These files are local design references and implementation starting points. Recr
 ## Fidelity
 
 High-fidelity frontend screen generated from this request. TypeScript/Vite verification status is listed below.${repairAttempts ? ` Verification required ${repairAttempts} automatic repair pass.` : ""}
+
+## DesignForge Quality Evidence
+
+- Design brief: ${designBrief ? BRIEF_PATH : "not-created"}
+- Context manifest: ${designContext ? CONTEXT_PATH : "not-created"}
+- Quality audit: ${qualityAudit ? QUALITY_AUDIT_PATH : "not-created"}
+
+${designBrief ? `### Brief\n\n\`\`\`json\n${designBrief.trim()}\n\`\`\`` : ""}
+
+${designContext ? `### Context\n\n\`\`\`json\n${designContext.trim()}\n\`\`\`` : ""}
+
+${qualityAudit ? `### Quality Audit\n\n\`\`\`json\n${qualityAudit.trim()}\n\`\`\`` : ""}
 
 ## Verification & Preview
 
@@ -1013,6 +1458,10 @@ ${designSystem.trim()}
 - CODEX_DESIGN.md
 - ${ANCHORS_PATH}
 - ${PROMPT_PATH}
+- ${BRIEF_PATH}
+- ${CONTEXT_PATH}
+${qualityAudit ? `- ${QUALITY_AUDIT_PATH}` : ""}
+${qualityAudit ? `- ${QUALITY_PROMPT_PATH}` : ""}
 ${repairAttempts ? `- ${REPAIR_PROMPT_PATH}` : ""}
 ${critique ? `- ${critique.promptPath}` : ""}
 ${critique ? `- ${critique.manifestPath}` : ""}
@@ -1259,6 +1708,101 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
+  async function runManualQualityAudit() {
+    if (busy) return;
+    setBusy(true);
+    setStep("quality", "active");
+    try {
+      const path = await ensureActionWorkspace();
+      await appendChatMessage(path, "assistant", "사용자 요청으로 디자인 품질 검사를 시작합니다.", "tool", "info");
+
+      let consoleInfo = manualConsoleInfo;
+      let screenshot = manualScreenshotInfo;
+
+      if (preview?.url && !consoleInfo) {
+        setStep("console", "active");
+        try {
+          consoleInfo = await captureConsole(path, preview.url);
+          setManualConsoleInfo(consoleInfo);
+          setStep("console", "done");
+        } catch (error) {
+          setStep("console", "error");
+          pushLog("error", `Console capture unavailable before quality audit: ${textFromError(error)}`);
+        }
+      }
+
+      if (preview?.url && !screenshot) {
+        setStep("screenshot", "active");
+        try {
+          screenshot = await captureScreenshot(path, preview.url);
+          setManualScreenshotInfo(screenshot);
+          setStep("screenshot", "done");
+        } catch (error) {
+          setStep("screenshot", "error");
+          pushLog("error", `Screenshot unavailable before quality audit: ${textFromError(error)}`);
+        }
+      }
+
+      let audit = await writeQualityAuditPrompt(path, latestRun?.request ?? "Manual DesignForge quality audit", screenshot, consoleInfo);
+      const snapshot = await snapshotGeneratedFiles(path);
+
+      try {
+        const qualityPrompt = await callTauri<string>("read_file", {
+          workspacePath: path,
+          relativePath: QUALITY_PROMPT_PATH,
+        });
+        await runCodexPrompt(path, qualityPrompt, "Codex quality audit");
+
+        setStep("verify", "active");
+        const verifyResult = await verifyWorkspace(path);
+        setManualVerifyResult(verifyResult);
+        if (!verifyResult.success) {
+          setStep("verify", "error");
+          throw new Error("Quality audit pass broke workspace verification.");
+        }
+        setStep("verify", "done");
+
+        try {
+          const authored = await readQualityAuditManifest(path);
+          audit = {
+            ...audit,
+            ...authored,
+            status: authored.status === "failed" ? "failed" : authored.status === "no-change" ? "no-change" : "applied",
+            updatedAt: new Date().toISOString(),
+            verificationPassed: true,
+          };
+        } catch {
+          audit = { ...audit, status: "applied", updatedAt: new Date().toISOString(), verificationPassed: true };
+        }
+        await saveQualityAuditManifest(path, audit);
+        await refreshFiles(path);
+        await writeAnchorManifest(path);
+        setStep("quality", audit.status === "failed" ? "error" : "done");
+        await appendChatMessage(path, "assistant", `품질 검사가 완료됐습니다. status=${audit.status}.`, "tool", "success");
+      } catch (error) {
+        await restoreGeneratedFiles(path, snapshot);
+        audit = {
+          ...audit,
+          status: "failed",
+          updatedAt: new Date().toISOString(),
+          verificationPassed: false,
+          error: textFromError(error),
+        };
+        await saveQualityAuditManifest(path, audit);
+        setStep("quality", "error");
+        await refreshFiles(path);
+        await appendChatMessage(path, "assistant", `품질 검사 변경을 롤백했습니다: ${textFromError(error)}`, "tool", "error");
+      }
+    } catch (error) {
+      const message = textFromError(error);
+      setStep("quality", "error");
+      pushLog("error", message);
+      if (workspacePath) await appendChatMessage(workspacePath, "assistant", `품질 검사 중단: ${message}`, "tool", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runManualExport() {
     if (busy) return;
     setBusy(true);
@@ -1309,8 +1853,55 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
+  async function startGuidedClarification(request: string) {
+    const questions = questionsForMode("guided", request).slice(0, 4);
+    const draft = { request, questions, createdAt: new Date().toISOString() };
+    setInput("");
+    setBusy(true);
+    setGuidedDraft(draft);
+    try {
+      const path = await ensureWorkspace();
+      await loadChatHistory(path);
+      await appendChatMessage(path, "user", request);
+      await appendChatMessage(path, "assistant", buildGuidedClarificationMessage(request, questions), "chat", "info");
+      pushLog("info", "Guided mode requested clarification before generation.");
+    } catch (error) {
+      pushMessage("user", request);
+      pushMessage("assistant", buildGuidedClarificationMessage(request, questions), "chat", "info");
+      pushLog("error", `Could not persist guided clarification: ${textFromError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runChat() {
-    await runDesignRequest(input);
+    const request = input.trim();
+    if (!request || busy) return;
+
+    if (generationMode === "guided" && !guidedDraft) {
+      await startGuidedClarification(request);
+      return;
+    }
+
+    if (generationMode === "guided" && guidedDraft) {
+      const combinedRequest = `${guidedDraft.request}
+
+Guided clarification answers:
+${request}`;
+      const recordRequest = `${guidedDraft.request}
+
+질문 답변:
+${request}`;
+      setGuidedDraft(null);
+      await runDesignRequest(combinedRequest, {
+        displayRequest: request,
+        recordRequest,
+        commentNote: recordRequest,
+      });
+      return;
+    }
+
+    await runDesignRequest(request);
   }
 
   async function runDesignRequest(rawRequest: string, options: RunRequestOptions = {}) {
@@ -1324,8 +1915,10 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     setManualConsoleInfo(null);
     setManualScreenshotInfo(null);
     setManualCritique(null);
+    setManualQualityAudit(null);
     setManualExportPath("");
     const displayRequest = options.displayRequest ?? request;
+    const recordRequest = options.recordRequest ?? displayRequest;
     const commentNote = options.commentNote ?? displayRequest;
     const commentAnchorId = options.anchorId ?? anchorFromRequest(request);
     const commentScreenLabel = options.screenLabel ?? "Generated Screen";
@@ -1335,6 +1928,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     let lastResult: CommandResult | null = null;
     let repairAttempts = 0;
     let anchors: AnchorManifest | null = null;
+    let brief: DesignBriefManifest | null = null;
+    let context: DesignContextManifest | null = null;
 
     try {
       setStep("context", "active");
@@ -1345,17 +1940,32 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       await loadCodexSession(path);
       await loadAnchorManifest(path);
       await loadChatHistory(path);
+      await loadQualityAudit(path);
       await appendChatMessage(path, "user", displayRequest);
       await appendChatMessage(path, "assistant", "워크스페이스와 이전 DesignForge 대화를 연결했습니다.", "status", "info");
       setStep("context", "done");
 
       setStep("design", "active");
-      await appendChatMessage(path, "assistant", "DESIGN.md 기준을 확인하고 필요한 경우만 초기화합니다.", "status", "info");
-      await seedDesignSystem(path, request);
+      await appendChatMessage(path, "assistant", "DESIGN.md를 섹션별로 검사하고 부족한 품질 기준을 보강합니다.", "status", "info");
+      const designHealth = await prepareDesignSystem(path, request);
       setStep("design", "done");
 
+      setStep("brief", "active");
+      context = await writeDesignContextManifest(path);
+      brief = await writeDesignBriefManifest(path, request, generationMode, designHealth, context);
+      setLatestContext(context);
+      setLatestBrief(brief);
+      await appendChatMessage(
+        path,
+        "assistant",
+        `Design Brief를 작성했습니다. mode=${brief.mode}, health=${brief.designSystemHealth.score}/100.`,
+        "tool",
+        "success",
+      );
+      setStep("brief", "done");
+
       setStep("prompt", "active");
-      const prompt = await writePrompt(path, request);
+      const prompt = await writePrompt(path, request, brief, context);
       await appendChatMessage(path, "assistant", `${PROMPT_PATH}에 Codex 전달 프롬프트를 준비했습니다.`, "tool", "success");
       setStep("prompt", "done");
 
@@ -1377,7 +1987,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       const runId = crypto.randomUUID();
       await recordRun(path, {
         id: runId,
-        request: displayRequest,
+        request: recordRequest,
         status: "success",
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -1385,6 +1995,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         artifactPath: ARTIFACT_PATH,
         anchorManifestPath: ANCHORS_PATH,
         anchorCount: anchors.anchors.length,
+        briefPath: BRIEF_PATH,
+        contextPath: CONTEXT_PATH,
         codexExitCode: lastResult?.code ?? result.code,
         codexSessionId: (lastResult ?? result).sessionId ?? codexSession?.sessionId,
         codexUsedResume: (lastResult ?? result).usedResume,
@@ -1420,7 +2032,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         const runId = crypto.randomUUID();
         await recordRun(path, {
           id: runId,
-          request: displayRequest,
+        request: recordRequest,
           status: "error",
           startedAt,
           finishedAt: new Date().toISOString(),
@@ -1428,6 +2040,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           artifactPath: ARTIFACT_PATH,
           anchorManifestPath: anchors ? ANCHORS_PATH : undefined,
           anchorCount: anchors?.anchors.length,
+          briefPath: brief ? BRIEF_PATH : undefined,
+          contextPath: context ? CONTEXT_PATH : undefined,
           codexExitCode: lastResult?.code ?? null,
           codexSessionId: lastResult?.sessionId ?? codexSession?.sessionId,
           codexUsedResume: lastResult?.usedResume,
@@ -1482,12 +2096,15 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
   const codexSessionLabel = codexSession?.sessionId ? shortSessionId(codexSession.sessionId) : "fresh";
   const visibleArtifacts = visibleFiles.length ? visibleFiles : [{ relativePath: ARTIFACT_PATH, isDirectory: false }];
   const verifyStepStatus = steps.find((step) => step.id === "verify")?.status ?? "idle";
+  const qualityStepStatus = steps.find((step) => step.id === "quality")?.status ?? "idle";
   const consolePath = manualConsoleInfo?.relativePath ?? latestRun?.consolePath;
   const consoleErrors = manualConsoleInfo?.errorCount ?? latestRun?.consoleErrorCount;
   const consoleWarnings = manualConsoleInfo?.warningCount ?? latestRun?.consoleWarningCount;
   const screenshotPath = manualScreenshotInfo?.relativePath ?? latestRun?.screenshotPath;
   const exportReadyPath = manualExportPath || latestRun?.exportPath || "";
   const critiqueStatus = manualCritique?.status ?? latestRun?.critiqueStatus;
+  const qualityStatus = manualQualityAudit?.status ?? latestRun?.qualityAuditStatus;
+  const designHealth = latestBrief?.designSystemHealth;
   const visibleLogs = showAllLogs ? logs : logs.slice(-8);
   const verificationRows: Array<{ name: string; value: string; tone: "lime" | "cyan" | "amber" | "danger" | "steel" }> = [
     {
@@ -1522,12 +2139,28 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       value: screenshotPath ? "캡처됨" : "요청 대기",
       tone: screenshotPath ? "lime" : "steel",
     },
+    {
+      name: "품질",
+      value: qualityStatus
+        ? qualityStatus
+        : qualityStepStatus === "active"
+          ? "진행 중"
+          : "요청 대기",
+      tone:
+        qualityStatus === "applied" || qualityStatus === "no-change"
+          ? "lime"
+          : qualityStatus === "failed"
+            ? "danger"
+            : qualityStepStatus === "active"
+              ? "cyan"
+              : "steel",
+    },
   ];
 
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="grid h-screen min-w-[1180px] grid-cols-[320px_minmax(560px,1fr)_360px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+      className="grid h-screen min-w-[1180px] grid-cols-[360px_minmax(520px,1fr)_340px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
     >
       <aside
         data-comment-anchor="navigation"
@@ -1581,15 +2214,84 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           <Badge tone="steel">{codexSession ? "resume on" : "fresh next"}</Badge>
         </div>
 
-        <section data-comment-anchor="feature-list" className="mt-6 rounded-xl border border-[var(--line)] bg-white">
+        <section data-comment-anchor="agent-chat" className="mt-5 flex min-h-[560px] flex-1 flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
+            <div className="min-w-0">
+              <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design conversation</p>
+              <h2 className="mt-1 text-lg font-semibold text-[var(--ink-strong)]">디자인 대화</h2>
+            </div>
+            <Badge tone={guidedDraft ? "cyan" : "steel"}>{guidedDraft ? "답변 대기" : `${messages.length}개`}</Badge>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] px-4 py-4">
+            <div className="grid gap-3">
+              {messages.slice(-40).map((message) => (
+                <ChatRow key={message.id} message={message} />
+              ))}
+            </div>
+          </div>
+
+          <div data-comment-anchor="hero" className="border-t border-[var(--line)] bg-white p-3">
+            {guidedDraft ? (
+              <div className="mb-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--charcoal)]">
+                <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
+                <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
+              </div>
+            ) : null}
+
+            <label className="mb-2 inline-flex min-h-8 items-center gap-2 rounded-full border border-[var(--line)] bg-white px-3 text-xs font-medium text-[var(--charcoal)]">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-black"
+                checked={generationMode === "variations"}
+                onChange={(event) => selectGenerationMode(event.target.checked ? "variations" : "guided")}
+                disabled={busy || Boolean(guidedDraft)}
+              />
+              3안으로 비교 생성
+            </label>
+
+            <label className="sr-only" htmlFor="designforge-request">
+              DesignForge 요청
+            </label>
+            <textarea
+              id="designforge-request"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
+              }}
+              className="min-h-28 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-[15px] leading-7 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+              placeholder={
+                guidedDraft
+                  ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
+                  : "DesignForge에게 만들고 싶은 화면이나 수정할 컴포넌트를 대화하듯 입력하세요."
+              }
+              disabled={busy}
+            />
+            <div data-comment-anchor="primary-action" className="mt-3 flex justify-end gap-2">
+              <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => {
+                setInput("");
+                setGuidedDraft(null);
+              }} disabled={busy || (!input && !guidedDraft)} aria-label="입력 비우기">
+                비우기
+              </Button>
+              <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-9 px-4 text-xs">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {guidedDraft ? "답변 보내기" : "보내기"}
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section data-comment-anchor="feature-list" className="mt-5 rounded-xl border border-[var(--line)] bg-white">
           <div className="border-b border-[var(--line)] p-4">
             <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design system</p>
             <h2 className="mt-2 text-xl font-medium tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
           </div>
           {[
-            ["Canvas", "paper-white", "#ffffff"],
-            ["Controls", "rounded-full pills", "black / white"],
-            ["Panels", "12px radius", "1px hairline"],
+            ["Brief", latestBrief?.mode ?? generationMode, designHealth ? `${designHealth.score}/100` : "pending"],
+            ["Context", latestContext ? `${latestContext.assetFiles.length} assets` : "pending", latestContext ? `${latestContext.sourceFiles.length} src` : "ready"],
+            ["System", designHealth?.status ?? "not scored", designHealth?.missingSections.length ? `${designHealth.missingSections.length} gaps` : "stable"],
             ["Artifact", ARTIFACT_PATH, preview ? "live" : "ready"],
           ].map(([name, value, note]) => (
             <div
@@ -1603,76 +2305,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
               <span className="shrink-0 text-right text-xs text-[var(--muted)]">{note}</span>
             </div>
           ))}
-        </section>
-
-        <section data-comment-anchor="agent-chat" className="mt-5 shrink-0">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[var(--ink-strong)]">작업 대화</h2>
-            <Badge tone="steel">{messages.length}개</Badge>
-          </div>
-          <div className="max-h-40 overflow-auto rounded-xl border border-[var(--line)] bg-white p-3">
-            <div className="grid gap-2">
-              {messages.slice(-24).map((message) => (
-                <ChatRow key={message.id} message={message} />
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section data-comment-anchor="hero" className="mt-5 shrink-0 border-t border-[var(--line)] pt-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[var(--ink-strong)]">요청 입력</h2>
-            <Badge tone="steel">ko-first</Badge>
-          </div>
-          <div className="grid gap-3">
-            <label className="sr-only" htmlFor="designforge-request">
-              DesignForge 요청
-            </label>
-            <textarea
-              id="designforge-request"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
-              }}
-              className="min-h-32 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
-              placeholder="DesignForge에게 만들고 싶은 화면이나 수정할 컴포넌트를 입력하세요."
-              disabled={busy}
-            />
-            <div data-comment-anchor="primary-action" className="flex gap-2">
-              <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="flex-1">
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                생성 실행
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setInput("")}
-                disabled={busy || !input}
-                aria-label="입력 비우기"
-              >
-                비우기
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-2 text-xs text-[var(--muted)]">
-            <p className="font-medium text-[var(--ink)]">최근 요청</p>
-            {runHistory.length === 0 && (
-              <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 leading-5 text-[var(--muted)]">
-                첫 실행 후 최근 요청이 여기에 쌓입니다.
-              </div>
-            )}
-            {runHistory.slice(0, 2).map((run) => (
-              <button
-                key={run.id}
-                type="button"
-                onClick={() => setInput(run.request)}
-                className="line-clamp-2 rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-left leading-5 hover:bg-[var(--panel-2)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
-              >
-                {run.request}
-              </button>
-            ))}
-          </div>
         </section>
       </aside>
 
@@ -1957,13 +2589,17 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
               <Code2 size={14} />
               크리틱 실행
             </Button>
+            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+              <CheckCircle2 size={14} />
+              품질 검사
+            </Button>
             <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
               <FileText size={14} />
               Export 생성
             </Button>
           </div>
           <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-            기본 생성은 Codex 변경 반영까지만 실행합니다. Node 기반 검증과 Vite preview는 이 버튼을 누를 때만 시작됩니다.
+            기본 생성은 brief/context 작성과 Codex 변경 반영까지만 실행합니다. Node 기반 검증, 프리뷰, 캡처, 품질 검사는 버튼을 누를 때만 시작됩니다.
           </p>
         </section>
 
@@ -2066,12 +2702,14 @@ function ChatRow({ message }: { message: ChatMessage }) {
           : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]";
 
   return (
-    <div className={cn("rounded-xl border px-3 py-2 text-xs leading-5", levelClass)}>
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="font-medium">{isUser ? "user" : message.kind ?? "agent"}</span>
-        <span className={cn("shrink-0 font-mono text-[10px]", isUser ? "text-white/70" : "text-[var(--muted)]")}>{timestamp}</span>
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div className={cn("max-w-[94%] rounded-2xl border px-4 py-3 text-[15px] leading-7 shadow-sm", levelClass)}>
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <span className="font-medium">{isUser ? "user" : message.kind ?? "DesignForge"}</span>
+          <span className={cn("shrink-0 font-mono text-[10px]", isUser ? "text-white/70" : "text-[var(--muted)]")}>{timestamp}</span>
+        </div>
+        <p className="whitespace-pre-wrap break-words">{message.content}</p>
       </div>
-      <p className="whitespace-pre-wrap break-words">{message.content}</p>
     </div>
   );
 }

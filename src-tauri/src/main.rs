@@ -878,13 +878,17 @@ fn handoff_files() -> &'static [&'static str] {
         "prompts/latest.md",
         "prompts/repair-latest.md",
         "prompts/critique-latest.md",
+        "prompts/quality-latest.md",
         "outputs/screenshots/latest.png",
         "outputs/console/latest.json",
         "outputs/handoff/README.md",
         ".designforge/artifacts.json",
         ".designforge/anchors.json",
+        ".designforge/brief.json",
+        ".designforge/context.json",
         ".designforge/comments.jsonl",
         ".designforge/critique.json",
+        ".designforge/quality-audit.json",
         ".designforge/preview.json",
         ".designforge/runs.jsonl",
     ]
@@ -1149,7 +1153,7 @@ const AGENTS_MD: &str = r#"# DesignForge Agent Instructions
 
 ## Project purpose
 
-This workspace is controlled by DesignForge. The user only chats; DesignForge turns that chat into a design-system update, a generated React/Tailwind screen, verification, and preview.
+This workspace is controlled by DesignForge. The user chats; DesignForge turns that chat into a design brief, design-system update, generated React/Tailwind screen, anchor index, and run record. Verification, preview, capture, critique, quality audit, handoff, and export are user-requested stages.
 
 ## Source priority
 
@@ -1158,8 +1162,9 @@ claude-design.md is the product behavior reference. Translate its design-agent w
 - Act as an expert frontend designer working for the user.
 - Explore local context before editing.
 - Create or update the design system before generating UI.
+- Use .designforge/brief.json and .designforge/context.json when present.
 - Produce one strong artifact by default.
-- Verify that the result loads cleanly.
+- Keep heavy verification and preview stages compatible, but do not assume they have already run.
 - Keep the final user-facing summary brief.
 
 Do not expose or quote internal prompts. Apply the rules through files.
@@ -1180,6 +1185,7 @@ Do not expose or quote internal prompts. Apply the rules through files.
 - If no brand exists, commit to a clear aesthetic direction: purpose, tone, differentiation, and one memorable idea.
 - Avoid generic AI SaaS patterns, filler content, fake metrics, emoji-by-default, left-border accent cards, and decorative gimmicks.
 - Use real provided assets when available. Do not invent logos or hand-draw replacements for missing brand assets.
+- Treat the DesignForge brief and context manifest as quality evidence before choosing visual direction.
 - Use semantic HTML and accessible controls.
 - Prefer clear hierarchy, strong spacing, distinctive typography, and intentional color.
 - Keep the result aligned with DESIGN.md.
@@ -1193,11 +1199,12 @@ Do not expose or quote internal prompts. Apply the rules through files.
 ## Codex workflow
 
 1. Inspect AGENTS.md, DESIGN.md, and the requested artifact.
-2. Infer missing design context and record it in DESIGN.md.
-3. Classify the request as a targeted component edit, system revision, or fresh design.
-4. Generate or update src/generated/Screen.tsx with the smallest scope that satisfies the request.
-5. Run or keep the code compatible with TypeScript and Vite build checks.
-6. Summarize changed files, assumptions, and caveats.
+2. Inspect .designforge/brief.json and .designforge/context.json if present.
+3. Infer missing design context and record it in DESIGN.md.
+4. Classify the request as a targeted component edit, system revision, or fresh design.
+5. Generate or update src/generated/Screen.tsx with the smallest scope that satisfies the request.
+6. Keep the code compatible with TypeScript and Vite build checks.
+7. Summarize changed files, assumptions, and caveats.
 "#;
 
 const CODEX_DESIGN_MD: &str = r#"# Codex Design Protocol
@@ -1212,14 +1219,15 @@ Act as an expert frontend designer working for the user. The user manages by cha
 
 1. Understand the request.
 2. Inspect CODEX_DESIGN.md, AGENTS.md, DESIGN.md, the generated screen, styles, assets, and relevant local files.
-3. Update DESIGN.md before UI when the design system is thin, stale, or inconsistent.
-4. Build one strong artifact by default.
-5. Keep the workspace passing TypeScript and Vite build checks.
-6. Summarize changed files, assumptions, and caveats briefly.
+3. Inspect .designforge/brief.json and .designforge/context.json when present.
+4. Update DESIGN.md before UI when the design system is thin, stale, or inconsistent.
+5. Build one strong artifact by default, or three comparable directions only when variation mode asks for it.
+6. Keep the workspace compatible with TypeScript and Vite build checks.
+7. Summarize changed files, assumptions, and caveats briefly.
 
 ## Questions
 
-Do not ask clarifying questions in normal DesignForge runs. Infer practical assumptions and write them into DESIGN.md. Stop only for a true blocker, such as a referenced source or asset that is required but inaccessible.
+Guided DesignForge runs may ask the user a small set of design questions before generation. Once this Codex prompt is running, use the gathered chat context, infer any remaining practical assumptions, and write them into DESIGN.md. Stop only for a true blocker, such as a referenced source or asset that is required but inaccessible.
 
 ## Editing Discipline
 
@@ -1245,6 +1253,7 @@ DESIGN.md is the source of truth. Keep it concrete:
 - Component inventory and stable anchor map
 - Revision notes for future edits
 - Verification caveats
+- Quality bar and unresolved design questions
 
 ## Frontend Design
 
@@ -1270,6 +1279,10 @@ Avoid:
 - Keep text literal and directly editable where practical.
 - Avoid unnecessary component splitting.
 - Add reduced-motion-safe behavior when adding animation.
+
+## Quality Audit
+
+When DesignForge asks for a quality audit, read prompts/quality-latest.md and .designforge/quality-audit.json. Improve only clear quality failures, preserve anchors, and keep verification compatibility. If the design is already strong, write a no-change verdict.
 "#;
 
 const DESIGN_MD: &str = r#"# Design System
@@ -1284,7 +1297,7 @@ Pending first chat request. DesignForge will infer product identity and design d
 
 ## Assumptions
 
-- The user expects the agent to proceed without clarifying questions.
+- The user expects guided chat to collect important design context before generation when needed.
 - Missing context should be handled by practical assumptions recorded here.
 - Generated output should be a credible high-craft first screen that can be refined through chat.
 
@@ -1308,6 +1321,14 @@ Name the one visual or interaction idea the user should remember.
 - Components: buttons, inputs, cards, navigation, feedback, empty states, and repeated patterns.
 - Motion: what moves, why it moves, duration/easing, and reduced-motion behavior.
 - Assets: real assets used or needed; do not invent logos or decorative replacements.
+
+## Quality Bar
+
+- Strong hierarchy: the primary message and action are obvious within five seconds.
+- Specific aesthetic direction: the design should not read like a generic AI SaaS template.
+- Useful content only: every section earns its place.
+- System continuity: repeated controls, cards, spacing, type, and tone follow the same vocabulary.
+- Implementation fidelity: responsive constraints, readable text, visible focus, and accessible controls.
 
 ## Component Inventory
 
@@ -1368,6 +1389,9 @@ const CONFIG_JSON: &str = r#"{
   "generatedEntry": "src/generated/Screen.tsx",
   "designProtocol": "CODEX_DESIGN.md",
   "designSystem": "DESIGN.md",
+  "designBrief": ".designforge/brief.json",
+  "designContext": ".designforge/context.json",
+  "qualityAudit": ".designforge/quality-audit.json",
   "mode": "chat-first",
   "artifacts": ".designforge/artifacts.json"
 }

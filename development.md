@@ -1,8 +1,8 @@
 # DesignForge Chat-First Architecture
 
-`claude-design.md` is the primary product behavior reference. This file is only the implementation log for translating that behavior into a Codex + React/Tailwind + Tauri app.
+`claude-design.md` is the primary product behavior reference. This file is the implementation log for translating that behavior into a Codex + React/Tailwind + Tauri app.
 
-The app must not expose or quote the source prompt. It should translate the behavior into product structure: understand intent, inspect context, create a design system, generate one clear artifact, verify, iterate, and export.
+The app must not expose or quote the source prompt. It should translate the behavior into product structure: understand intent, inspect context, create or refine a design system, generate one clear artifact by default, support targeted edits, and provide optional verification and handoff evidence.
 
 ## Core Product Decision
 
@@ -10,32 +10,26 @@ DesignForge should not be a multi-page tool where the user manually visits Works
 
 The primary UI is **Chat**.
 
-The user types one request. DesignForge automatically runs the internal pipeline:
+The default chat path is light and design-focused:
 
 1. Create or open a local workspace.
-2. Seed or update `DESIGN.md` from the `claude-design.md` design-agent workflow.
-3. Compile a structured prompt.
-4. Save the prompt to `prompts/latest.md`.
-5. Run Codex CLI in the workspace.
-6. Generate or update `src/generated/Screen.tsx`.
-7. Verify the generated workspace.
-8. If verification fails, run one repair prompt and verify again.
-9. Start preview, verify HTTP response, and write `.designforge/preview.json`.
-10. Capture screenshot evidence to `outputs/screenshots/latest.png`.
-11. Capture runtime console evidence to `outputs/console/latest.json`.
-12. Write screenshot/console-driven critique input to `prompts/critique-latest.md` and `.designforge/critique.json`.
-13. Run one Codex critique pass when screenshot evidence exists.
-14. Re-verify after critique and roll back critique edits if verification breaks.
-15. Refresh preview/screenshot/console evidence after an applied critique.
-16. Write `outputs/handoff/README.md` with verification, preview, screenshot, console, and critique evidence.
-17. Package handoff files to `outputs/exports/designforge-handoff.zip`.
-18. Index `data-comment-anchor` values into `.designforge/anchors.json`.
-19. Let the user select a generated component through preview click-selection or the anchor list.
-20. Compile selected component edits with `<mentioned-element>` and `@anchor` context.
-21. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
-22. Refresh artifacts and logs.
+2. Inspect existing files, assets, styles, generated artifact, and anchors.
+3. Inspect `DESIGN.md` health.
+4. Seed or repair `DESIGN.md` only when it is missing, placeholder, thin, or structurally incomplete.
+5. Write `.designforge/context.json`.
+6. Write `.designforge/brief.json`.
+7. Compile a structured prompt with the design brief, context manifest, design system, generation mode, selected element context, and recent feedback.
+8. Save the prompt to `prompts/latest.md`.
+9. Run Codex CLI in the workspace.
+10. Generate or update `src/generated/Screen.tsx`.
+11. Refresh workspace files and generated artifact metadata.
+12. Index `data-comment-anchor` values into `.designforge/anchors.json`.
+13. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
+14. Append a run record to `.designforge/runs.jsonl`.
 
-No clarifying-question flow by default. If context is missing, the agent records assumptions in `DESIGN.md` and proceeds.
+Guided mode is the default conversation path. DesignForge asks a small set of design questions first, waits for the user's answer, then bundles the original request and answer into the generation prompt. If context is still missing after that, the agent records practical assumptions in `DESIGN.md` and proceeds.
+
+Verification, repair, preview, screenshot capture, console capture, critique, quality audit, handoff, and export are manual workbench actions. They are not part of every default generation because small design iterations should not pay the full evidence cost.
 
 ## Why This Matches `claude-design.md`
 
@@ -48,46 +42,44 @@ The reference prompt is not mainly about UI chrome. It is about disciplined desi
 - design-system grounding
 - minimal targeted edits
 - bold frontend aesthetic direction when no brand exists
-- verification and preview
-- comments/anchors for feedback
+- verification and preview when needed
+- comments and anchors for feedback
 - export and handoff paths
 
-DesignForge should implement those ideas as app structure, not as visible navigation.
+DesignForge implements those ideas as app structure, not as visible navigation.
 
 ## Claude Design Alignment Audit
 
-`claude-design.md` was reviewed as a 9,200-line behavior reference. Its structure breaks down into:
-
-- core workflow, document reading, output creation, anchor preservation, screen labelling, questions, and verification
-- Design Component authoring rules, small edit discipline, tweakable props, and direct-edit constraints
-- domain skills for canvas, animation, decks, docs, frontend design, wireframes, exports, handoff, and design-system creation
-- file/tool contracts and starter component source code
-
-DesignForge intentionally translates the behavior rather than copying Claude's private runtime:
+`claude-design.md` was reviewed as a behavior reference. Its structure maps to these DesignForge decisions:
 
 - DC files become a React/Tailwind `src/generated/Screen.tsx` artifact because this app previews Vite workspaces.
 - `<mentioned-element>` becomes a preview selection bridge that posts selected `data-comment-anchor`, screen label, tag, text, and DOM path back to the host.
 - `data-comment-anchor` and `data-screen-label` remain mandatory continuity primitives.
 - "Small targeted change" becomes an anchored request mode that edits the selected semantic region and preserves unrelated layout, spacing, typography, colors, copy, and anchors.
-- "Create/update design system first" becomes persistent `DESIGN.md`; the prompt now treats it as the continuing source of truth, with component inventory and revision rules.
-- "Make tweakable" maps to component-level edit requests today; true source-level inline text/style splicing is a next step.
+- "Create/update design system first" becomes persistent `DESIGN.md`; the prompt treats it as the continuing source of truth.
+- "Ask questions when needed" becomes guided mode: ask the user first, then produce an artifact and record remaining assumptions or unresolved questions in the brief and `DESIGN.md`.
+- "Explore alternatives" becomes variation mode: produce three comparable directions in one artifact with stable variation anchors.
+- "Quality review" becomes a manual quality-audit pass with a score, findings, changes, and risks.
 
 ## Current App Shape
 
 The app now has:
 
 - One chat input
+- Generation mode controls
 - Component-level edit panel
-- Automatic pipeline status
+- Pipeline status
 - DesignForge workbench preview surface
 - Artifact list
 - Verification evidence
+- Brief/context/system-health evidence
+- Quality audit evidence
 - Run history and export actions
 - System log
 - Preview click-selection bridge for anchored generated regions
-- Hidden workspace/prompt/Codex machinery
+- Hidden workspace, prompt, Codex, verification, critique, and export machinery
 
-The old feature navigation is intentionally removed. Workspace, Prompt Studio, Files, Preview, Settings, and Logs become internal modules, not top-level user destinations.
+The old feature navigation is intentionally removed. Workspace, Prompt Studio, Files, Preview, Settings, and Logs are internal modules, not top-level user destinations.
 
 ## Workspace Structure
 
@@ -107,9 +99,10 @@ designforge-workspace/
   assets/
   artifacts/
   prompts/
-    critique-latest.md
     latest.md
     repair-latest.md
+    critique-latest.md
+    quality-latest.md
   outputs/
     screenshots/
     console/
@@ -119,9 +112,12 @@ designforge-workspace/
   .designforge/
     artifacts.json
     anchors.json
+    brief.json
     comments.jsonl
+    context.json
     critique.json
     preview.json
+    quality-audit.json
     runs.jsonl
     settings.json
 ```
@@ -149,10 +145,12 @@ Do not build a plugin system or database yet. `.designforge/artifacts.json` is e
 The prompt compiler should always produce a deterministic prompt with:
 
 - workspace role
-- instruction to read `AGENTS.md` and `DESIGN.md`
-- instruction not to ask questions
-- instruction to record assumptions in `DESIGN.md`
+- instruction to read `AGENTS.md`, `CODEX_DESIGN.md`, and `DESIGN.md`
+- instruction to read `.designforge/brief.json` and `.designforge/context.json` when present
+- instruction not to block on questions
+- instruction to record assumptions and unresolved questions in `DESIGN.md`
 - exact artifact path
+- generation mode: guided or variations
 - request classification: targeted component edit, system revision, or fresh design
 - continuing design-system rule: preserve `DESIGN.md` and current artifact unless the request explicitly asks for a new direction
 - selected-anchor rule: requests containing `@anchor` or `<mentioned-element>` edit that semantic region first
@@ -163,17 +161,58 @@ The prompt compiler should always produce a deterministic prompt with:
 
 ## `DESIGN.md` Behavior
 
-On first chat:
+On each chat:
 
-- If `DESIGN.md` is placeholder or thin, seed it from the user's request.
+- If `DESIGN.md` is missing, placeholder, or thin, seed it from the user's request.
+- If `DESIGN.md` has useful structure but misses important sections, append a concise quality scaffold.
 - If `DESIGN.md` is already substantial, preserve it.
-- Codex may update it before editing the generated artifact.
+- Codex may update `DESIGN.md` before editing the generated artifact.
 
-This makes the design system automatic without asking the user to fill a form.
+The design-system health gate should reward evidence of purpose, audience, visual direction, tokens, layout, components, interaction states, accessibility, responsive behavior, assets, quality bar, and revision notes.
+
+## Design Brief And Context
+
+`.designforge/context.json` records the local evidence available to the next Codex run:
+
+- asset files
+- style/config files
+- source files
+- generated artifact existence
+- anchor count
+- notes about available or missing evidence
+
+`.designforge/brief.json` turns the user's request into a design task:
+
+- request type
+- audience and purpose assumptions
+- generation mode
+- design-system health
+- local context summary
+- quality bar
+- unresolved questions to carry forward without blocking
+
+These manifests are part of the functional pipeline, not decorative documentation.
+
+## Quality Audit
+
+The quality audit is manual and user-triggered. It writes `prompts/quality-latest.md` and `.designforge/quality-audit.json`, then runs Codex against the generated workspace.
+
+The audit must inspect:
+
+- `CODEX_DESIGN.md`
+- `AGENTS.md`
+- `DESIGN.md`
+- `.designforge/brief.json`
+- `.designforge/context.json`
+- generated artifact
+- styles/config
+- optional screenshot and console evidence
+
+It scores the work from 0 to 100 across hierarchy, aesthetic specificity, spacing, typography, color, content usefulness, interaction clarity, accessibility, responsiveness, and design-system continuity. If the score is below the quality bar or defects are clear, it makes focused improvements. If the design is already strong, it writes a no-change verdict.
 
 ## Backend Commands
 
-Current commands cover the verified chat-first loop:
+Current commands cover the chat-first loop and manual evidence loop:
 
 - `create_workspace`
 - `open_workspace`
@@ -195,13 +234,11 @@ Backend behavior implemented:
 - append run records to `.designforge/runs.jsonl`
 - append chat feedback records to `.designforge/comments.jsonl`
 - index generated comment anchors to `.designforge/anchors.json`
-- verify generated workspace with TypeScript and Vite build
-- start/stop workspace preview server
+- verify generated workspace with TypeScript and Vite build on request
+- start/stop workspace preview server on request
 - verify preview HTTP health and write `.designforge/preview.json`
-- capture screenshots
-- capture browser console evidence
-- write and run critique prompt/manifest from screenshot and console evidence
-- roll back critique edits if post-critique verification fails
+- capture screenshots on request
+- capture browser console evidence on request
 - export handoff zip with native Rust zip packaging
 - create handoff bundle
 - fall back from Codex `workspace-write` to `danger-full-access` only when the Windows sandbox cannot launch child processes
@@ -215,57 +252,57 @@ Do not add a generic shell runner.
 Visible:
 
 - Chat
+- Generation mode selector
 - Preview surface
 - Pipeline status
 - Artifacts
+- Design brief/context/system health
 - Verification evidence
+- Quality evidence
 - Run history
 - System log
+- Export action
 
 Internal:
 
 - workspace manager
 - prompt compiler
-- design-system seeder
+- design-system health gate
+- design brief writer
+- context manifest writer
 - Codex runner
 - verification runner
 - one-pass repair runner
 - artifact indexer
 - preview selection bridge
 - selected component edit compiler
-- handoff writer
 - feedback memory writer
 - anchor indexer
-- preview runner later
+- preview runner
 - preview manifest writer
 - screenshot capture
 - console capture
 - critique prompt runner
+- quality audit prompt runner
+- handoff writer
 - handoff exporter
-- exporter later
 
 ## Implementation Phases
 
 ### Phase 1 - Chat-First MVP
 
-Status: implemented in the current app shell.
+Status: implemented.
 
 - Remove top-level navigation.
 - Add single chat workspace.
 - Auto-open/create workspace.
-- Auto-seed `DESIGN.md`.
+- Auto-inspect local context.
+- Auto-seed or repair thin `DESIGN.md`.
+- Auto-write `.designforge/context.json`.
+- Auto-write `.designforge/brief.json`.
 - Auto-save `prompts/latest.md`.
 - Auto-run Codex.
-- Auto-repair once if verification fails.
-- Auto-write handoff README after successful verification.
-- Auto-write preview manifest after preview start/stop/error.
-- Auto-capture screenshot evidence after preview succeeds.
-- Auto-capture browser console evidence after preview succeeds.
-- Auto-run screenshot-driven critique after preview succeeds.
-- Auto-roll back critique edits if post-critique verification fails.
-- Auto-export handoff zip after successful handoff generation.
 - Auto-index `data-comment-anchor` values for element-level feedback.
-- Show a recent-run action to reveal the exported zip in Explorer.
 - Auto-store chat feedback for the next prompt.
 - Show pipeline and logs.
 
@@ -274,35 +311,31 @@ Status: implemented in the current app shell.
 Status: implemented.
 
 - Write each chat run to `.designforge/runs.jsonl`.
-- Include request, prompt path, artifact path, status, timestamps, stdout/stderr summary.
+- Include request, prompt path, artifact path, brief path, context path, status, timestamps, stdout/stderr summary.
 - Show the latest few runs in the side panel.
 
-### Phase 3 - Preview Loop
+### Phase 3 - Preview And Verification Loop
 
-Status: implemented for MVP.
+Status: implemented as manual actions.
 
-- Start workspace Vite server.
+- Verify the generated workspace with TypeScript and Vite build on request.
+- Run one Codex repair pass after a failed verification on request.
+- Start workspace Vite server on request.
 - Show generated screen preview.
 - Write preview process and HTTP status to `.designforge/preview.json`.
-- Capture preview screenshot to `outputs/screenshots/latest.png`.
-- Capture browser console evidence to `outputs/console/latest.json`.
-- Typecheck and build the generated workspace before preview.
-- Run one Codex repair pass if typecheck/build fails.
-- Write a handoff README with verification and preview status.
-- Prepare and run `prompts/critique-latest.md` with `.designforge/critique.json` after screenshot capture.
-- Re-verify and refresh screenshot/console evidence after applied critique.
-- Capture screenshot to `outputs/screenshots/`. Basic latest screenshot capture is implemented.
-- Feed console logs into critique.
+- Capture preview screenshot to `outputs/screenshots/latest.png` on request.
+- Capture browser console evidence to `outputs/console/latest.json` on request.
+- Prepare and run `prompts/critique-latest.md` with `.designforge/critique.json` on request.
+- Re-verify and roll back critique edits if verification breaks.
 
-### Phase 4 - Performance And Ponytail Audit
+### Phase 4 - Performance Audit
 
 Status: implemented for current bottlenecks.
 
-- Apply the Ponytail audit workflow from `DietrichGebert/ponytail` without adding a runtime dependency.
-- Remove unused TypeScript surface area found during the audit.
+- Remove unused TypeScript surface area found during audit work.
 - Keep frontend logs bounded and truncate very large command output before rendering.
 - Avoid file-list state updates when the indexed workspace entries are unchanged.
-- Remove intermediate file refreshes inside repair and critique stages where a final refresh already happens.
+- Remove intermediate file refreshes where a final refresh already happens.
 - Skip common heavy generated directories during backend file indexing.
 - Move long-running backend commands to `tauri::async_runtime::spawn_blocking`.
 - Record future upgrade triggers with `ponytail:` comments only where the tradeoff is intentional.
@@ -311,43 +344,55 @@ Status: implemented for current bottlenecks.
 
 Status: implemented for anchored component feedback.
 
-- Add user notes attached to artifact path. Chat-level feedback records are implemented.
+- Add user notes attached to artifact path.
 - Store `@anchor-name` references when chat feedback targets an element.
 - Write `.designforge/anchors.json` from generated `data-comment-anchor` attributes.
-- Add simple comment records. `.designforge/comments.jsonl` is implemented.
+- Add simple comment records in `.designforge/comments.jsonl`.
 - Preserve and generate `data-screen-label` and `data-comment-anchor` in prompt instructions.
-- Compile feedback into the next Codex run. Recent feedback is injected into `prompts/latest.md`.
+- Compile feedback into the next Codex run.
 - Inject a preview selection bridge into the workspace `src/App.tsx` wrapper.
 - Let users click anchored regions in the live preview while selection mode is active.
 - Show anchor-list fallback selection when preview click selection is unavailable.
 - Compile selected component edits as targeted requests with `<mentioned-element>` context.
-- Strengthen generated prompts to classify requests and avoid full-screen rewrites for component-level edits.
 
-### Phase 6 - Export And Handoff
+### Phase 6 - Quality System
 
-Status: implemented for MVP.
+Status: implemented.
 
-- Export selected files as zip. Native backend handoff zip export is implemented.
+- Add generation modes: guided and variations.
+- Add `DESIGN.md` health inspection.
+- Add design brief manifest.
+- Add context manifest.
+- Add manual quality audit prompt.
+- Add quality audit manifest.
+- Add quality evidence to the UI and handoff.
+
+### Phase 7 - Export And Handoff
+
+Status: implemented for MVP as a manual action.
+
+- Export selected files as zip.
 - Reveal exported zip from the recent run list.
-- Export screenshot, console, and critique files.
-- Generate handoff README with screens, layout, interactions, tokens, assets, and files. Basic README generation is implemented.
+- Export screenshot, console, critique, brief, context, and quality audit files when present.
+- Generate handoff README with request, artifact, design-system evidence, verification, preview, screenshot, console, critique, quality audit, assets, and files.
 - Later add standalone HTML, PDF, and PPTX support.
 
 ## Verification Snapshot
 
-Verified on Windows after dependency installation and Tauri resource repair:
+Use this set before release builds:
 
-- `npm run typecheck` passes.
-- `node ./node_modules/typescript/bin/tsc --noEmit --noUnusedLocals --noUnusedParameters --pretty false` passes.
-- `npm run build` passes.
-- `designforge-workspace`: `npm run typecheck` and `npm run build` pass with the preview selection bridge.
-- `cargo check --manifest-path src-tauri/Cargo.toml` passes.
-- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` passes.
-- `npx --yes knip --reporter compact` passes with no unused-code findings.
-- `npm run tauri -- build` produces `src-tauri/target/release/designforge.exe`.
-- NSIS packaging produces `src-tauri/target/release/bundle/nsis/DesignForge_0.1.0_x64-setup.exe`.
-- A real chat run completed successfully with preview, screenshot, console capture, critique, handoff README, and handoff zip.
-- Latest successful workspace run recorded `consoleErrorCount: 0`, `consoleWarningCount: 0`, `anchorCount: 2`, and `critiqueStatus: applied`.
+```powershell
+node ./node_modules/typescript/bin/tsc --noEmit
+node ./scripts/build.mjs
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+node ./node_modules/@tauri-apps/cli/tauri.js build
+```
+
+Expected release outputs:
+
+- `src-tauri/target/release/designforge.exe`
+- `src-tauri/target/release/bundle/nsis/DesignForge_0.1.0_x64-setup.exe`
 
 ## Next Plan
 
@@ -356,33 +401,24 @@ Verified on Windows after dependency installation and Tauri resource repair:
    - Detect stale PATH/session issues and suggest exact recovery commands.
    - Show workspace dependency status before a chat run starts.
 
-2. Run diagnostics and failure UX
-   - Surface Codex sandbox fallback in the run record and UI.
-   - Distinguish dependency install failure, Codex CLI failure, verification failure, preview failure, screenshot failure, console failure, critique rollback, and export failure.
-   - Add a retry action for failed stages where the previous artifacts are still valid.
-
-3. Direct edit splicing
+2. Direct edit splicing
    - For simple text-only or color-only component edits, patch the source region directly before invoking Codex.
    - Preserve the Codex targeted-edit path for structural changes, copy rewrites, and ambiguous requests.
    - Add a manifest entry showing whether an edit was direct-spliced or Codex-assisted.
 
-4. Performance profiling
-   - Add per-stage duration markers for Codex, verification, preview startup, screenshot capture, console capture, critique, and export.
-   - Persist the slowest stage in each run record so repeated lag reports have evidence.
-   - Add a lightweight UI indicator when the backend is running a blocking worker task.
+3. Run diagnostics and failure UX
+   - Surface Codex sandbox fallback in the run record and UI.
+   - Distinguish dependency install failure, Codex CLI failure, verification failure, preview failure, screenshot failure, console failure, critique rollback, quality audit failure, and export failure.
+   - Add a retry action for failed stages where the previous artifacts are still valid.
 
-5. Export expansion
+4. Export expansion
    - Add standalone HTML export from the generated workspace.
    - Keep PDF/PPTX as later formats after standalone HTML is reliable.
    - Include a machine-readable export manifest beside the zip.
 
-6. Settings surface
+5. Settings surface
    - Add UI controls for workspace path, Codex path, package manager, and browser path.
    - Persist these settings in local storage and mirror workspace-scoped settings where appropriate.
-
-7. Screenshot and critique evidence
-   - Add richer screenshot metadata: viewport size, browser path, capture duration, image dimensions, and file size.
-   - Add console summary metadata to `.designforge/critique.json` and handoff README.
 
 ## Non-Goals
 
