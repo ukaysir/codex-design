@@ -58,7 +58,10 @@ The app now has:
 
 - One chat input
 - Automatic pipeline status
+- DesignForge workbench preview surface
 - Artifact list
+- Verification evidence
+- Run history and export actions
 - System log
 - Hidden workspace/prompt/Codex machinery
 
@@ -177,6 +180,8 @@ Backend behavior implemented:
 - export handoff zip with native Rust zip packaging
 - create handoff bundle
 - fall back from Codex `workspace-write` to `danger-full-access` only when the Windows sandbox cannot launch child processes
+- skip heavy workspace directories such as `.git`, `node_modules`, `target`, and `dist` during file indexing
+- run long Codex, verification, screenshot, console, and export work through blocking worker tasks instead of holding the Tauri command thread
 
 Do not add a generic shell runner.
 
@@ -185,8 +190,11 @@ Do not add a generic shell runner.
 Visible:
 
 - Chat
+- Preview surface
 - Pipeline status
 - Artifacts
+- Verification evidence
+- Run history
 - System log
 
 Internal:
@@ -259,7 +267,20 @@ Status: implemented for MVP.
 - Capture screenshot to `outputs/screenshots/`. Basic latest screenshot capture is implemented.
 - Feed console logs into critique.
 
-### Phase 4 - Feedback Loop
+### Phase 4 - Performance And Ponytail Audit
+
+Status: implemented for current bottlenecks.
+
+- Apply the Ponytail audit workflow from `DietrichGebert/ponytail` without adding a runtime dependency.
+- Remove unused TypeScript surface area found during the audit.
+- Keep frontend logs bounded and truncate very large command output before rendering.
+- Avoid file-list state updates when the indexed workspace entries are unchanged.
+- Remove intermediate file refreshes inside repair and critique stages where a final refresh already happens.
+- Skip common heavy generated directories during backend file indexing.
+- Move long-running backend commands to `tauri::async_runtime::spawn_blocking`.
+- Record future upgrade triggers with `ponytail:` comments only where the tradeoff is intentional.
+
+### Phase 5 - Feedback Loop
 
 Status: partially implemented.
 
@@ -268,9 +289,9 @@ Status: partially implemented.
 - Write `.designforge/anchors.json` from generated `data-comment-anchor` attributes.
 - Add simple comment records. `.designforge/comments.jsonl` is implemented.
 - Preserve and generate `data-screen-label` and `data-comment-anchor` in prompt instructions.
-- Compile feedback into next Codex run. Recent feedback is injected into `prompts/latest.md`.
+- Compile feedback into the next Codex run. Recent feedback is injected into `prompts/latest.md`.
 
-### Phase 5 - Export And Handoff
+### Phase 6 - Export And Handoff
 
 Status: implemented for MVP.
 
@@ -285,7 +306,11 @@ Status: implemented for MVP.
 Verified on Windows after dependency installation and Tauri resource repair:
 
 - `npm run typecheck` passes.
+- `node ./node_modules/typescript/bin/tsc --noEmit --noUnusedLocals --noUnusedParameters --pretty false` passes.
+- `npm run build` passes.
 - `cargo check --manifest-path src-tauri/Cargo.toml` passes.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` passes.
+- `npx --yes knip --reporter compact` passes with no unused-code findings.
 - `npm run tauri -- build` produces `src-tauri/target/release/designforge.exe`.
 - NSIS packaging produces `src-tauri/target/release/bundle/nsis/DesignForge_0.1.0_x64-setup.exe`.
 - A real chat run completed successfully with preview, screenshot, console capture, critique, handoff README, and handoff zip.
@@ -303,16 +328,21 @@ Verified on Windows after dependency installation and Tauri resource repair:
    - Distinguish dependency install failure, Codex CLI failure, verification failure, preview failure, screenshot failure, console failure, critique rollback, and export failure.
    - Add a retry action for failed stages where the previous artifacts are still valid.
 
-3. Export expansion
+3. Performance profiling
+   - Add per-stage duration markers for Codex, verification, preview startup, screenshot capture, console capture, critique, and export.
+   - Persist the slowest stage in each run record so repeated lag reports have evidence.
+   - Add a lightweight UI indicator when the backend is running a blocking worker task.
+
+4. Export expansion
    - Add standalone HTML export from the generated workspace.
    - Keep PDF/PPTX as later formats after standalone HTML is reliable.
    - Include a machine-readable export manifest beside the zip.
 
-4. Settings surface
+5. Settings surface
    - Add UI controls for workspace path, Codex path, package manager, and browser path.
    - Persist these settings in local storage and mirror workspace-scoped settings where appropriate.
 
-5. Screenshot and critique evidence
+6. Screenshot and critique evidence
    - Add richer screenshot metadata: viewport size, browser path, capture duration, image dimensions, and file size.
    - Add console summary metadata to `.designforge/critique.json` and handoff README.
 

@@ -5,7 +5,8 @@ DesignForge is a local Windows desktop scaffold for a Codex-powered UI generatio
 ## Current MVP
 
 - Tauri v2 app shell with React, TypeScript, Vite, and Tailwind CSS
-- Chat-first desktop tool layout with automatic pipeline status and persistent logs
+- DesignForge workbench UI with request intake, live preview, pipeline evidence, artifacts, run history, and exports in one screen
+- Chat-first desktop tool layout with automatic pipeline status and bounded persistent logs
 - Workspace create/open flow
 - Starter workspace file generation
 - Workspace-scoped file list/read/write commands
@@ -30,6 +31,7 @@ DesignForge is a local Windows desktop scaffold for a Codex-powered UI generatio
 - Windows app icon resources generated under `src-tauri/icons`
 - Native Tauri backend zip export, without PowerShell archive dependency
 - Windows Codex sandbox fallback when `workspace-write` process launch fails
+- Ponytail-guided performance pass: heavy workspace folders are skipped, long backend jobs run off the Tauri command thread, unchanged file lists avoid rerenders, intermediate refreshes are reduced, and large logs are capped/truncated
 
 ## Install
 
@@ -51,7 +53,11 @@ The current Windows environment has completed:
 
 ```powershell
 npm run typecheck
+node ./node_modules/typescript/bin/tsc --noEmit --noUnusedLocals --noUnusedParameters --pretty false
+npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+npx --yes knip --reporter compact
 npm run tauri -- build
 ```
 
@@ -155,12 +161,13 @@ Existing files are not overwritten.
 - Console capture requires Microsoft Edge or Chrome headless CLI.
 - Codex output is captured after completion, not streamed.
 - File commands are workspace-scoped. Codex falls back to `danger-full-access` only when the Windows `workspace-write` sandbox fails to launch child processes.
-- Frontend typecheck/build, Rust `cargo check`, Tauri release build, and NSIS packaging are verified locally.
+- Frontend typecheck/build, unused TypeScript scan, Knip dead-code scan, Rust `cargo check`, Rust Clippy, Tauri release build, and NSIS packaging are verified locally.
+- Ponytail was used as an audit workflow from `DietrichGebert/ponytail`; no runtime dependency was added to DesignForge.
 
 ## Next Steps
 
 1. Add an environment health panel for Node, npm, Rust, WebView2, Codex CLI, browser capture, and workspace dependency status.
-2. Add richer run diagnostics for Codex sandbox fallback, repair attempts, critique pass, screenshot capture, console capture, and export verification.
-3. Add richer screenshot inspection metadata when Codex CLI exposes it directly.
+2. Add profiling markers for slow stages if users still see lag after the command-thread and render reductions.
+3. Add richer run diagnostics for Codex sandbox fallback, repair attempts, critique pass, screenshot capture, console capture, and export verification.
 4. Add richer export formats: standalone HTML first, then PDF/PPTX if needed.
 5. Add settings UI for workspace path, Codex path, package manager, and browser capture options.

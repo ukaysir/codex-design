@@ -1,12 +1,3 @@
-export type Page =
-  | "home"
-  | "workspace"
-  | "prompt"
-  | "files"
-  | "preview"
-  | "settings"
-  | "logs";
-
 export type LogLevel = "info" | "success" | "error";
 
 export type LogEvent = {
@@ -134,6 +125,5 @@ export type Settings = {
   defaultWorkspaceDir: string;
   codexPath: string;
   packageManager: "npm" | "pnpm" | "bun";
-  theme: "dark" | "light" | "system";
   lastWorkspacePath: string;
 };

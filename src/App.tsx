@@ -1,5 +1,4 @@
 import {
-  Bot,
   CheckCircle2,
   Circle,
   Code2,
@@ -9,13 +8,11 @@ import {
   Loader2,
   Play,
   Send,
-  Sparkles,
   Square,
   Terminal,
-  Wand2,
   XCircle,
 } from "lucide-react";
-import type { ButtonHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import {
   buildCritiquePrompt,
@@ -47,7 +44,6 @@ const DEFAULT_SETTINGS: Settings = {
   defaultWorkspaceDir: "",
   codexPath: "codex",
   packageManager: "npm",
-  theme: "dark",
   lastWorkspacePath: "",
 };
 
@@ -65,6 +61,8 @@ const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
 const COMMENTS_PATH = ".designforge/comments.jsonl";
 const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
 const CONSOLE_PATH = "outputs/console/latest.json";
+const MAX_LOGS = 80;
+const LOG_PREVIEW_CHARS = 2000;
 
 type ChatMessage = {
   id: string;
@@ -133,16 +131,80 @@ function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45",
-        variant === "primary" && "bg-[var(--primary)] text-white hover:bg-[var(--primary-strong)]",
+        "inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
+        variant === "primary" && "bg-[var(--primary)] text-[#14170f] hover:bg-[var(--primary-strong)]",
         variant === "secondary" &&
-          "border border-[var(--line)] bg-[var(--panel-2)] text-[var(--ink)] hover:border-[var(--accent)]",
+          "border border-[var(--line)] bg-[var(--panel-2)] text-[var(--ink)] hover:border-[var(--accent)] hover:bg-[var(--panel-3)]",
         variant === "ghost" && "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--ink)]",
         className,
       )}
     >
       {children}
     </button>
+  );
+}
+
+function Badge({
+  children,
+  tone = "steel",
+}: {
+  children: ReactNode;
+  tone?: "lime" | "cyan" | "amber" | "danger" | "steel";
+}) {
+  const styles = {
+    lime: "border-lime-300/35 bg-lime-300/10 text-lime-100",
+    cyan: "border-cyan-300/35 bg-cyan-300/10 text-cyan-100",
+    amber: "border-amber-300/35 bg-amber-300/10 text-amber-100",
+    danger: "border-red-300/35 bg-red-300/10 text-red-100",
+    steel: "border-zinc-500/35 bg-zinc-800/70 text-zinc-300",
+  };
+
+  return (
+    <span
+      className={cn(
+        "inline-flex min-h-6 shrink-0 items-center whitespace-nowrap rounded border px-2 text-[11px] font-medium",
+        styles[tone],
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function stepLabel(status: StepStatus) {
+  if (status === "done") return "완료";
+  if (status === "active") return "진행 중";
+  if (status === "error") return "확인 필요";
+  return "대기";
+}
+
+function stepTone(status: StepStatus): "lime" | "cyan" | "amber" | "danger" | "steel" {
+  if (status === "done") return "lime";
+  if (status === "active") return "cyan";
+  if (status === "error") return "danger";
+  return "steel";
+}
+
+function runTone(status?: RunRecord["status"]): "lime" | "danger" | "steel" {
+  if (status === "success") return "lime";
+  if (status === "error") return "danger";
+  return "steel";
+}
+
+function truncatePath(path: string) {
+  return path.length > 42 ? `...${path.slice(-39)}` : path;
+}
+
+function trimLog(message: string) {
+  const clean = message.trim();
+  if (!clean) return "(empty output)";
+  return clean.length > LOG_PREVIEW_CHARS ? `${clean.slice(0, LOG_PREVIEW_CHARS)}\n...truncated` : clean;
+}
+
+function sameWorkspaceFiles(left: WorkspaceFile[], right: WorkspaceFile[]) {
+  return (
+    left.length === right.length &&
+    left.every((file, index) => file.relativePath === right[index]?.relativePath && file.isDirectory === right[index]?.isDirectory)
   );
 }
 
@@ -205,8 +267,8 @@ export default function App() {
 
   function pushLog(level: LogLevel, message: string) {
     setLogs((current) => [
-      ...current.slice(-199),
-      { id: crypto.randomUUID(), level, timestamp: now(), message: message.trim() || "(empty output)" },
+      ...current.slice(-(MAX_LOGS - 1)),
+      { id: crypto.randomUUID(), level, timestamp: now(), message: trimLog(message) },
     ]);
   }
 
@@ -241,8 +303,7 @@ export default function App() {
 
   async function refreshFiles(path: string) {
     const nextFiles = await callTauri<WorkspaceFile[]>("list_workspace_files", { workspacePath: path });
-    setFiles(nextFiles);
-    pushLog("info", `Indexed ${nextFiles.length} workspace entries.`);
+    setFiles((current) => (sameWorkspaceFiles(current, nextFiles) ? current : nextFiles));
   }
 
   async function loadRunHistory(path: string) {
@@ -479,8 +540,8 @@ export default function App() {
 
   function pushCommandResult(label: string, result: CommandResult) {
     pushLog(result.success ? "success" : "error", `${label}: exit ${result.code ?? "unknown"}`);
-    if (result.stdout.trim()) pushLog("info", result.stdout.trim().slice(0, 6000));
-    if (result.stderr.trim()) pushLog("error", result.stderr.trim().slice(0, 6000));
+    if (result.stdout.trim()) pushLog("info", result.stdout);
+    if (result.stderr.trim()) pushLog("error", result.stderr);
   }
 
   async function startPreview(path = workspacePath) {
@@ -735,7 +796,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         repairAttempts = 1;
         const repairPrompt = await writeRepairPrompt(path, request, verifyResult);
         lastResult = await runCodexPrompt(path, repairPrompt, "Codex repair");
-        await refreshFiles(path);
         setStep("repair", "done");
 
         setStep("verify", "active");
@@ -794,7 +854,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
             relativePath: CRITIQUE_PROMPT_PATH,
           });
           lastResult = await runCodexPrompt(path, critiquePrompt, "Codex critique");
-          await refreshFiles(path);
 
           setStep("verify", "active");
           const critiqueVerifyResult = await verifyWorkspace(path);
@@ -810,7 +869,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           critiqueApplied = true;
         } catch (error) {
           await restoreGeneratedFiles(path, snapshot);
-          await refreshFiles(path);
           setStep("verify", "done");
           critique = {
             ...critique,
@@ -987,159 +1045,293 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
+  const latestRun = runHistory[0];
+  const visibleArtifacts = visibleFiles.length ? visibleFiles : [{ relativePath: ARTIFACT_PATH, isDirectory: false }];
+  const verificationRows: Array<{ name: string; value: string; tone: "lime" | "cyan" | "amber" | "danger" | "steel" }> = [
+    {
+      name: "TypeScript/Vite",
+      value: latestRun?.status === "success" ? "통과" : latestRun?.status === "error" ? "실패" : busy ? "진행 중" : "대기",
+      tone: latestRun?.status === "success" ? "lime" : latestRun?.status === "error" ? "danger" : busy ? "cyan" : "steel",
+    },
+    {
+      name: "콘솔",
+      value: latestRun?.consolePath
+        ? `${latestRun.consoleErrorCount ?? 0} errors / ${latestRun.consoleWarningCount ?? 0} warnings`
+        : "대기",
+      tone:
+        latestRun?.consolePath && (latestRun.consoleErrorCount ?? 0) === 0 && (latestRun.consoleWarningCount ?? 0) === 0
+          ? "lime"
+          : latestRun?.consolePath
+            ? "amber"
+            : "steel",
+    },
+    {
+      name: "스크린샷",
+      value: latestRun?.screenshotPath ? "캡처됨" : "대기",
+      tone: latestRun?.screenshotPath ? "lime" : "steel",
+    },
+  ];
+
   return (
-    <div className="grid h-screen grid-cols-[minmax(0,1fr)_360px] overflow-hidden bg-[var(--bg)] text-[var(--ink)]">
-      <main className="grid min-w-0 grid-rows-[64px_minmax(0,1fr)_auto]">
-        <header className="flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)] px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-[var(--primary)] text-white">
-              <Wand2 size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-sm font-semibold">DesignForge</div>
-              <div className="truncate text-xs text-[var(--muted)]">
-                {workspacePath || DEFAULT_WORKSPACE} · {ARTIFACT_PATH}
-              </div>
-            </div>
+    <div
+      data-screen-label="designforge-workbench"
+      className="grid h-screen min-w-[1180px] grid-cols-[300px_minmax(520px,1fr)_360px] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+    >
+      <aside
+        data-comment-anchor="navigation"
+        className="flex min-h-0 flex-col border-r border-[var(--line)] bg-[var(--panel)] px-5 py-5"
+      >
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-lime-200/80">local codex studio</p>
+            <h1 className="mt-1 font-serif text-3xl tracking-normal text-[var(--ink-strong)]">DesignForge</h1>
+            <p className="mt-2 truncate text-xs text-[var(--muted)]" title={workspacePath || DEFAULT_WORKSPACE}>
+              {truncatePath(workspacePath || DEFAULT_WORKSPACE)}
+            </p>
           </div>
-          <div className="hidden items-center gap-2 text-xs text-[var(--muted)] md:flex">
-            <Sparkles size={14} className="text-[var(--accent)]" />
-            Chat drives the full design pipeline
-          </div>
+          <Badge tone="lime">로컬</Badge>
         </header>
 
-        <section className="min-h-0 overflow-auto px-5 py-6">
-          <div className="mx-auto grid max-w-4xl gap-4">
-            {messages.map((message) => (
-              <article
-                key={message.id}
-                className={cn(
-                  "max-w-[78ch] rounded-lg border px-4 py-3 text-sm leading-6",
-                  message.role === "user"
-                    ? "ml-auto border-[var(--primary)] bg-[var(--primary)] text-white"
-                    : "border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]",
-                )}
-              >
-                {message.content}
-              </article>
-            ))}
-            {busy && (
-              <article className="flex max-w-[78ch] items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm text-[var(--muted)]">
-                <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
-                구조화, 디자인 시스템 시드, Codex 실행 중
-              </article>
-            )}
-          </div>
-        </section>
+        <nav className="mt-7 grid gap-1 text-sm text-zinc-300" aria-label="작업 보기">
+          {["작업대", "생성 기록", "디자인 시스템", "검증 로그"].map((item, index) => (
+            <button
+              key={item}
+              type="button"
+              className={cn(
+                "flex min-h-10 items-center justify-between rounded-md px-3 text-left transition focus:outline-none focus:ring-2 focus:ring-cyan-300/70",
+                index === 0 ? "bg-[var(--panel-3)] text-[var(--ink-strong)]" : "hover:bg-[var(--panel-2)]",
+              )}
+            >
+              <span>{item}</span>
+              {index === 0 ? <span className="h-1.5 w-1.5 rounded-full bg-lime-300" /> : null}
+            </button>
+          ))}
+        </nav>
 
-        <footer className="border-t border-[var(--line)] bg-[var(--panel)] p-4">
-          <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)_auto] gap-3">
+        <section data-comment-anchor="chat-request" className="mt-auto pt-6">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[var(--ink-strong)]">요청 입력</h2>
+            <Badge tone="cyan">대화형</Badge>
+          </div>
+          <div className="grid gap-3">
+            <label className="sr-only" htmlFor="designforge-request">
+              DesignForge 요청
+            </label>
             <textarea
+              id="designforge-request"
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
               }}
-              className="min-h-24 w-full resize-none rounded-md border border-[var(--line)] bg-[var(--bg)] p-3 text-sm leading-6 text-[var(--ink)] placeholder:text-[var(--muted)]"
-              placeholder="만들고 싶은 프론트엔드 디자인을 그대로 입력하세요. 예: 공공 데이터 서비스 랜딩 페이지를 고급스럽게 만들어줘."
+              className="min-h-36 w-full resize-none rounded-md border border-[var(--line-strong)] bg-[#101210] p-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/30"
+              placeholder="만들고 싶은 프론트엔드 디자인을 그대로 입력하세요."
               disabled={busy}
             />
-            <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="self-end">
-              {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              Send
+            <div data-comment-anchor="primary-action" className="flex gap-2">
+              <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="flex-1">
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                생성 실행
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setInput("")}
+                disabled={busy || !input}
+                aria-label="입력 비우기"
+              >
+                비우기
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-2 text-xs text-zinc-400">
+            <p className="font-medium text-zinc-300">최근 요청</p>
+            {runHistory.length === 0 && (
+              <div className="rounded border border-[var(--line)] px-3 py-2 leading-5 text-[var(--muted)]">
+                첫 실행 후 최근 요청이 여기에 쌓입니다.
+              </div>
+            )}
+            {runHistory.slice(0, 2).map((run) => (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => setInput(run.request)}
+                className="line-clamp-2 rounded border border-[var(--line)] px-3 py-2 text-left leading-5 hover:bg-[var(--panel-2)] focus:outline-none focus:ring-2 focus:ring-cyan-300/70"
+              >
+                {run.request}
+              </button>
+            ))}
+          </div>
+        </section>
+      </aside>
+
+      <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-[var(--canvas)]">
+        <div className="flex min-h-14 items-center justify-between border-b border-[var(--line)] px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <h2 className="truncate text-sm font-semibold text-[var(--ink-strong)]">생성 디자인 캔버스</h2>
+            <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              className="min-h-9 px-3 text-xs"
+              onClick={() => void startPreviewSafely()}
+              disabled={!workspacePath}
+            >
+              <Play size={14} />
+              시작
             </Button>
+            <Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => void stopPreviewSafely()} disabled={!preview}>
+              <Square size={14} />
+              중지
+            </Button>
+            <span className="rounded-md border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">100%</span>
           </div>
-        </footer>
-      </main>
+        </div>
 
-      <aside className="grid min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] border-l border-[var(--line)] bg-[var(--panel)]">
-        <section className="border-b border-[var(--line)] p-4">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-            <Bot size={16} className="text-[var(--accent)]" />
-            Automatic Pipeline
-          </div>
-          <div className="grid gap-2">
-            {steps.map((step) => (
-              <div key={step.id} className="grid grid-cols-[20px_1fr] gap-2 rounded-md bg-[var(--bg)] p-2">
-                <StepIcon status={step.status} />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">{step.label}</div>
-                  <div className="text-xs text-[var(--muted)]">{step.detail}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-b border-[var(--line)] p-4">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-            <FolderOpen size={16} className="text-[var(--accent)]" />
-            Artifacts
-          </div>
-          <div className="grid gap-2">
-            {(visibleFiles.length ? visibleFiles : [{ relativePath: ARTIFACT_PATH, isDirectory: false }]).map((file) => (
-              <div key={file.relativePath} className="flex items-center gap-2 rounded-md bg-[var(--bg)] px-2 py-2 text-xs">
-                {file.relativePath.endsWith(".md") ? <FileText size={14} /> : <Code2 size={14} />}
-                <span className="truncate font-mono text-[var(--muted)]">{file.relativePath}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-b border-[var(--line)] p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Play size={16} className="text-[var(--accent)]" />
-              Preview
+        <section className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-stone-400/45 bg-[#e9e0ce] shadow-2xl shadow-black/35">
+            <div className="flex min-h-10 items-center justify-between border-b border-stone-300 bg-[#f6efe2] px-4 text-xs text-stone-600">
+              <span className="truncate font-mono">{ARTIFACT_PATH}</span>
+              <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비"}</span>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                className="h-8 px-2"
-                onClick={() => void startPreviewSafely()}
-                disabled={!workspacePath}
-                aria-label="Start preview"
-                title="Start preview"
-              >
-                <Play size={14} />
-              </Button>
-              <Button
-                variant="ghost"
-                className="h-8 px-2"
-                onClick={() => void stopPreviewSafely()}
-                disabled={!preview}
-                aria-label="Stop preview"
-                title="Stop preview"
-              >
-                <Square size={14} />
-              </Button>
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg)]">
             {preview ? (
-              <iframe title="Workspace preview" src={preview.url} className="h-44 w-full bg-white" />
+              <iframe title="Workspace preview" src={preview.url} className="h-[min(70vh,720px)] w-full bg-white" />
             ) : (
-              <div className="grid h-44 place-items-center px-3 text-center text-xs leading-5 text-[var(--muted)]">
-                Preview starts automatically after a successful Codex run.
+              <div className="grid min-h-[560px] grid-cols-[210px_1fr] bg-[#ece3d1] text-stone-950">
+                <div className="border-r border-stone-300 bg-[#d8d0c1] p-4">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-stone-600">DesignForge</p>
+                  <div className="mt-6 grid gap-2">
+                    {["브리프", "시스템", "화면", "검증"].map((item, index) => (
+                      <div
+                        key={item}
+                        className={cn(
+                          "rounded px-3 py-2 text-sm",
+                          index === 1 ? "bg-stone-950 text-lime-100" : "bg-stone-200",
+                        )}
+                      >
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="min-w-0 p-6">
+                  <div className="flex items-start justify-between gap-5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-cyan-800">현재 산출물</p>
+                      <h3 className="mt-2 max-w-xl break-keep font-serif text-3xl leading-tight tracking-normal">
+                        반복 생성에 맞춘 실제 작업 화면
+                      </h3>
+                    </div>
+                    <span className="shrink-0 rounded bg-lime-200 px-3 py-1 text-xs font-bold text-stone-950">
+                      {latestRun?.status === "success" ? "검토 가능" : busy ? "작성 중" : "대기"}
+                    </span>
+                  </div>
+                  <div className="mt-8 grid grid-cols-3 gap-4">
+                    {[
+                      { title: "디자인 시스템", detail: "DESIGN.md에서 방향을 먼저 고정합니다." },
+                      { title: "React 화면", detail: "생성 화면은 한 파일 중심으로 관리합니다." },
+                      { title: "검증 리포트", detail: "빌드, 콘솔, 스크린샷을 한 흐름으로 봅니다." },
+                    ].map((item) => (
+                      <div key={item.title} className="min-h-28 rounded-md border border-stone-300 bg-[#f8f1e5] p-4">
+                        <p className="text-sm font-bold">{item.title}</p>
+                        <p className="mt-3 break-keep text-xs leading-5 text-stone-600">{item.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-6 min-h-40 rounded-md border border-stone-300 bg-stone-950 p-4 text-lime-100">
+                    <div className="flex items-center justify-between gap-4 text-xs">
+                      <span>verification console</span>
+                      <span>
+                        {latestRun?.consolePath
+                          ? `${latestRun.consoleErrorCount ?? 0} errors`
+                          : busy
+                            ? "running"
+                            : "waiting"}
+                      </span>
+                    </div>
+                    <div className="mt-7 grid gap-3 font-mono text-sm text-cyan-100">
+                      {messages.slice(-3).map((message) => (
+                        <p key={message.id} className="line-clamp-2">
+                          {message.role === "user" ? "> " : "$ "}
+                          {message.content}
+                        </p>
+                      ))}
+                      {busy && <p>codex exec · generating workspace artifact...</p>}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </section>
+      </main>
 
-        <section className="border-b border-[var(--line)] p-4">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-            <History size={16} className="text-[var(--accent)]" />
-            Recent Runs
+      <aside
+        data-comment-anchor="pipeline-status"
+        className="flex min-h-0 flex-col overflow-y-auto border-l border-[var(--line)] bg-[var(--panel-dark)] px-5 py-5"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-[var(--ink-strong)]">자동 파이프라인</h2>
+          <Badge tone={busy ? "cyan" : latestRun?.status === "error" ? "danger" : latestRun?.status === "success" ? "lime" : "steel"}>
+            {busy ? "실행 중" : latestRun?.status === "success" ? "완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
+          </Badge>
+        </div>
+
+        <section className="mt-5 grid gap-3" aria-label="파이프라인 단계">
+          {steps.map((step) => (
+            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 border-b border-zinc-800 pb-3">
+              <StepIcon status={step.status} />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100">{step.label}</p>
+                <p className="mt-1 truncate text-xs text-zinc-500">{step.detail}</p>
+              </div>
+              <Badge tone={stepTone(step.status)}>{stepLabel(step.status)}</Badge>
+            </div>
+          ))}
+        </section>
+
+        <section data-comment-anchor="artifact-list" className="mt-7">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[var(--ink-strong)]">아티팩트</h3>
+            <span className="text-xs text-zinc-500">{visibleArtifacts.length}개</span>
           </div>
           <div className="grid gap-2">
-            {runHistory.length === 0 && <div className="text-xs text-[var(--muted)]">No runs recorded yet.</div>}
-            {runHistory.slice(0, 5).map((run) => (
-              <div key={run.id} className="rounded-md bg-[var(--bg)] p-2">
-                <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                  <span className={run.status === "success" ? "text-[var(--accent)]" : "text-[var(--danger)]"}>
-                    {run.status}
+            {visibleArtifacts.slice(0, 8).map((file) => (
+              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-md border border-[var(--line)] bg-[var(--panel-2)] px-3 py-3">
+                {file.relativePath.endsWith(".md") ? <FileText size={14} /> : <Code2 size={14} />}
+                <span className="truncate font-mono text-xs text-zinc-200">{file.relativePath}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section data-comment-anchor="verification" className="mt-7">
+          <h3 className="text-sm font-semibold text-[var(--ink-strong)]">검증 결과</h3>
+          <div className="mt-3 grid gap-2">
+            {verificationRows.map((check) => (
+              <div key={check.name} className="flex min-h-9 items-center justify-between gap-3 border-b border-zinc-800 text-sm">
+                <span className="text-zinc-400">{check.name}</span>
+                <Badge tone={check.tone}>{check.value}</Badge>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-7">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
+            <History size={16} className="text-[var(--accent)]" />
+            생성 기록
+          </div>
+          <div className="grid gap-2">
+            {runHistory.length === 0 && <div className="text-xs text-[var(--muted)]">기록된 실행이 없습니다.</div>}
+            {runHistory.slice(0, 3).map((run) => (
+              <div key={run.id} className="rounded-md border border-[var(--line)] bg-[var(--panel-2)] p-3">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                  <Badge tone={runTone(run.status)}>
+                    {run.status === "success" ? "success" : "error"}
                     {run.repairAttempts ? ` · repair ${run.repairAttempts}` : ""}
-                  </span>
+                  </Badge>
                   <span className="text-[var(--muted)]">{new Date(run.finishedAt).toLocaleTimeString()}</span>
                 </div>
                 <div className="line-clamp-2 text-xs leading-5 text-[var(--ink)]">{run.request}</div>
@@ -1147,28 +1339,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
                   <div className="mt-2 grid gap-1 text-[11px] leading-4 text-[var(--muted)]">
                     {run.previewStatus && <span>preview: {run.previewStatus}</span>}
                     {run.critiqueStatus && <span>critique: {run.critiqueStatus}</span>}
-                    {run.consolePath && (
-                      <span className="truncate font-mono">
-                        {run.consolePath} ({run.consoleErrorCount ?? 0}/{run.consoleWarningCount ?? 0})
-                      </span>
-                    )}
                     {run.screenshotPath && <span className="truncate font-mono">{run.screenshotPath}</span>}
-                    {run.critiquePromptPath && (
-                      <span className="truncate font-mono">{run.critiquePromptPath}</span>
-                    )}
-                    {run.exportPath && (
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-mono">{run.exportPath}</span>
-                        <Button
-                          variant="ghost"
-                          className="h-7 shrink-0 px-2 text-[11px]"
-                          onClick={() => void revealPath(EXPORT_PATH)}
-                        >
-                          <FolderOpen size={12} />
-                          Reveal
-                        </Button>
-                      </span>
-                    )}
+                    {run.exportPath && <span className="truncate font-mono">{truncatePath(run.exportPath)}</span>}
                   </div>
                 )}
               </div>
@@ -1176,13 +1348,36 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           </div>
         </section>
 
-        <section className="min-h-0 overflow-auto p-4">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <section data-comment-anchor="export" className="mt-7 border-t border-zinc-800 pt-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-[var(--ink-strong)]">핸드오프 export</h3>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                스크린샷, 콘솔 로그, 변경 파일을 묶어 전달합니다.
+              </p>
+            </div>
+            <Badge tone={latestRun?.exportPath ? "lime" : busy ? "cyan" : "steel"}>
+              {latestRun?.exportPath ? "준비됨" : busy ? "생성 중" : "대기"}
+            </Badge>
+          </div>
+          <Button
+            variant="primary"
+            className="mt-4 w-full"
+            onClick={() => void revealPath(EXPORT_PATH)}
+            disabled={!workspacePath || !latestRun?.exportPath}
+          >
+            <FolderOpen size={16} />
+            export 열기
+          </Button>
+        </section>
+
+        <section className="mt-7 min-h-48 border-t border-zinc-800 pt-5">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
             <Terminal size={16} className="text-[var(--accent)]" />
-            System Log
+            시스템 로그
           </div>
           <div className="grid gap-2">
-            {logs.map((log) => (
+            {logs.slice(-8).map((log) => (
               <LogRow key={log.id} log={log} />
             ))}
           </div>
@@ -1193,21 +1388,21 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
 }
 
 function StepIcon({ status }: { status: StepStatus }) {
-  if (status === "done") return <CheckCircle2 size={16} className="mt-0.5 text-[var(--accent)]" />;
-  if (status === "error") return <XCircle size={16} className="mt-0.5 text-[var(--danger)]" />;
-  if (status === "active") return <Loader2 size={16} className="mt-0.5 animate-spin text-[var(--primary-strong)]" />;
-  return <Circle size={16} className="mt-0.5 text-[var(--muted)]" />;
+  if (status === "done") return <CheckCircle2 size={14} className="mt-0.5 text-lime-300" />;
+  if (status === "error") return <XCircle size={14} className="mt-0.5 text-red-300" />;
+  if (status === "active") return <Loader2 size={14} className="mt-0.5 animate-spin text-cyan-300" />;
+  return <Circle size={14} className="mt-0.5 text-zinc-600" />;
 }
 
 function LogRow({ log }: { log: LogEvent }) {
   return (
-    <div className="rounded-md border border-[var(--line)] bg-[var(--bg)] p-2">
+    <div className="rounded-md border border-[var(--line)] bg-[var(--panel-2)] p-3">
       <div className="mb-1 flex items-center justify-between gap-2 text-xs">
         <span
           className={cn(
             "font-medium",
-            log.level === "success" && "text-[var(--accent)]",
-            log.level === "error" && "text-[var(--danger)]",
+            log.level === "success" && "text-lime-200",
+            log.level === "error" && "text-red-200",
             log.level === "info" && "text-[var(--muted)]",
           )}
         >

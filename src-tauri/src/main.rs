@@ -118,7 +118,15 @@ fn check_codex(codex_path: String) -> Result<CommandResult, String> {
 }
 
 #[tauri::command]
-fn run_codex(
+async fn run_codex(
+    workspace_path: String,
+    codex_path: String,
+    prompt: String,
+) -> Result<CommandResult, String> {
+    run_blocking(move || run_codex_blocking(workspace_path, codex_path, prompt)).await
+}
+
+fn run_codex_blocking(
     workspace_path: String,
     codex_path: String,
     prompt: String,
@@ -154,12 +162,12 @@ fn run_codex_with_sandbox(
     prompt: &str,
     sandbox: &str,
 ) -> Result<CommandResult, String> {
-    let mut command = Command::new(tool_path(&codex_path));
+    let mut command = Command::new(tool_path(codex_path));
     command
-        .current_dir(&root)
+        .current_dir(root)
         .arg("exec")
         .arg("-C")
-        .arg(&root)
+        .arg(root)
         .arg("--sandbox")
         .arg(sandbox)
         .arg("--skip-git-repo-check")
@@ -180,7 +188,14 @@ fn should_retry_codex_without_windows_sandbox(result: &CommandResult) -> bool {
 }
 
 #[tauri::command]
-fn verify_workspace(
+async fn verify_workspace(
+    workspace_path: String,
+    package_manager: String,
+) -> Result<CommandResult, String> {
+    run_blocking(move || verify_workspace_blocking(workspace_path, package_manager)).await
+}
+
+fn verify_workspace_blocking(
     workspace_path: String,
     package_manager: String,
 ) -> Result<CommandResult, String> {
@@ -273,7 +288,11 @@ fn stop_preview(state: State<'_, PreviewState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn export_handoff(workspace_path: String) -> Result<ExportInfo, String> {
+async fn export_handoff(workspace_path: String) -> Result<ExportInfo, String> {
+    run_blocking(move || export_handoff_blocking(workspace_path)).await
+}
+
+fn export_handoff_blocking(workspace_path: String) -> Result<ExportInfo, String> {
     let root = canonical_workspace(&workspace_path)?;
     let export_root = root.join("outputs/exports");
     let stage = export_root.join("handoff-package");
@@ -321,7 +340,11 @@ fn reveal_path(workspace_path: String, relative_path: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn capture_screenshot(workspace_path: String, url: String) -> Result<ScreenshotInfo, String> {
+async fn capture_screenshot(workspace_path: String, url: String) -> Result<ScreenshotInfo, String> {
+    run_blocking(move || capture_screenshot_blocking(workspace_path, url)).await
+}
+
+fn capture_screenshot_blocking(workspace_path: String, url: String) -> Result<ScreenshotInfo, String> {
     let root = canonical_workspace(&workspace_path)?;
     let browser = find_browser()?;
     let screenshots = root.join("outputs/screenshots");
@@ -359,7 +382,11 @@ fn capture_screenshot(workspace_path: String, url: String) -> Result<ScreenshotI
 }
 
 #[tauri::command]
-fn capture_console(workspace_path: String, url: String) -> Result<ConsoleInfo, String> {
+async fn capture_console(workspace_path: String, url: String) -> Result<ConsoleInfo, String> {
+    run_blocking(move || capture_console_blocking(workspace_path, url)).await
+}
+
+fn capture_console_blocking(workspace_path: String, url: String) -> Result<ConsoleInfo, String> {
     let root = canonical_workspace(&workspace_path)?;
     let browser = find_browser()?;
     let console_dir = root.join("outputs/console");
@@ -446,6 +473,16 @@ fn run_command(command: &mut Command) -> Result<CommandResult, String> {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
+}
+
+async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("Background task failed: {error}"))?
 }
 
 fn run_node_tool(root: &Path, args: &[&str]) -> Result<CommandResult, String> {
