@@ -6,6 +6,8 @@ import {
   FolderOpen,
   History,
   Loader2,
+  Maximize2,
+  Minimize2,
   MousePointer2,
   Play,
   Send,
@@ -79,6 +81,8 @@ const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
 const COMMENTS_PATH = ".designforge/comments.jsonl";
 const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
 const CONSOLE_PATH = "outputs/console/latest.json";
+const ARTIFACT_VIEWPORT_WIDTH = 1920;
+const ARTIFACT_VIEWPORT_HEIGHT = 1080;
 const MAX_LOGS = 300;
 const LOG_PREVIEW_CHARS = 2000;
 
@@ -560,6 +564,7 @@ export default function App() {
   const [selectedAnchorId, setSelectedAnchorId] = useState("");
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
+  const [artifactOnlyMode, setArtifactOnlyMode] = useState(false);
   const [componentEdit, setComponentEdit] = useState("");
   const [manualVerifyResult, setManualVerifyResult] = useState<CommandResult | null>(null);
   const [manualConsoleInfo, setManualConsoleInfo] = useState<ConsoleInfo | null>(null);
@@ -624,6 +629,33 @@ export default function App() {
     window.addEventListener("message", handlePreviewMessage);
     return () => window.removeEventListener("message", handlePreviewMessage);
   }, []);
+
+  useEffect(() => {
+    function handleArtifactOnlyShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable;
+
+      if (event.key === "Escape" && artifactOnlyMode) {
+        event.preventDefault();
+        setArtifactOnlyMode(false);
+        return;
+      }
+
+      if (isTyping) return;
+
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        setArtifactOnlyMode((current) => !current);
+      }
+    }
+
+    window.addEventListener("keydown", handleArtifactOnlyShortcut);
+    return () => window.removeEventListener("keydown", handleArtifactOnlyShortcut);
+  }, [artifactOnlyMode]);
 
   useEffect(() => {
     if (!workspacePath) return;
@@ -897,6 +929,7 @@ export default function App() {
     setCodexSession(null);
     setPreview(null);
     setSelectionMode(false);
+    setArtifactOnlyMode(false);
     setAnchorManifest(null);
     setRunHistory([]);
     setSelectedAnchorId("");
@@ -2449,6 +2482,92 @@ ${request}`;
     },
   ];
 
+  if (artifactOnlyMode) {
+    return (
+      <div
+        data-screen-label="designforge-artifact-only-preview"
+        className="flex h-screen min-w-0 flex-col overflow-hidden bg-[#0b0b0b] text-white"
+      >
+        <header className="flex min-h-14 items-center justify-between gap-4 border-b border-[#252525] bg-[#111111] px-4">
+          <div className="min-w-0">
+            <p className="font-mono text-[11px] uppercase tracking-normal text-white/45">artifact only preview</p>
+            <h1 className="truncate text-base font-semibold">작업물 미리보기</h1>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded-full border border-[#2f2f2f] bg-[#171717] px-3 py-2 font-mono text-xs text-white/70">
+              {ARTIFACT_VIEWPORT_WIDTH} x {ARTIFACT_VIEWPORT_HEIGHT}
+            </span>
+            <Button
+              variant="ghost"
+              className="min-h-9 border-[#2f2f2f] bg-[#171717] px-3 text-xs text-white hover:bg-[#232323]"
+              onClick={() => void startPreviewSafely()}
+              disabled={busy || !workspacePath}
+            >
+              <Play size={14} />
+              시작
+            </Button>
+            <Button
+              variant="ghost"
+              className="min-h-9 border-[#2f2f2f] bg-[#171717] px-3 text-xs text-white hover:bg-[#232323]"
+              onClick={() => setSelectionMode((current) => !current)}
+              disabled={!preview}
+            >
+              <MousePointer2 size={14} />
+              {selectionMode ? "선택 중" : "선택 수정"}
+            </Button>
+            <Button
+              variant="ghost"
+              className="min-h-9 border-[#2f2f2f] bg-white px-3 text-xs text-black hover:bg-white/90"
+              onClick={() => setArtifactOnlyMode(false)}
+              title="Esc 키로도 돌아갈 수 있습니다."
+            >
+              <Minimize2 size={14} />
+              작업대로 돌아가기
+            </Button>
+          </div>
+        </header>
+
+        <section className="min-h-0 flex-1 overflow-auto p-6">
+          <div className="mx-auto w-max">
+            <div className="mb-3 flex items-center justify-between gap-4 text-xs text-white/55">
+              <span className="truncate font-mono">{ARTIFACT_PATH}</span>
+              <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비 필요"} · Ctrl+Shift+P 토글 · Esc 닫기</span>
+            </div>
+            <div
+              className="overflow-hidden bg-white shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+              style={{ width: ARTIFACT_VIEWPORT_WIDTH, height: ARTIFACT_VIEWPORT_HEIGHT }}
+            >
+              {preview ? (
+                <iframe
+                  title="Workspace artifact 1920 by 1080 preview"
+                  src={previewFrameSrc(preview.url, selectionMode)}
+                  className={cn(
+                    "block h-[1080px] w-[1920px] border-0 bg-white",
+                    selectionMode && "ring-4 ring-[var(--focus-ring)] ring-inset",
+                  )}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-white text-[var(--ink)]">
+                  <div className="max-w-md text-center">
+                    <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">preview waiting</p>
+                    <h2 className="mt-3 text-3xl font-semibold tracking-normal">미리보기를 먼저 시작하세요</h2>
+                    <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+                      이 모드는 작업물만 {ARTIFACT_VIEWPORT_WIDTH} x {ARTIFACT_VIEWPORT_HEIGHT} 원본 캔버스로 보여줍니다.
+                    </p>
+                    <Button className="mt-6" variant="primary" onClick={() => void startPreviewSafely()} disabled={busy || !workspacePath}>
+                      <Play size={16} />
+                      미리보기 시작
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div
       data-screen-label="designforge-workbench"
@@ -2713,7 +2832,18 @@ ${request}`;
               <MousePointer2 size={14} />
               선택 수정
             </Button>
-            <span className="rounded-full border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">100%</span>
+            <Button
+              variant="ghost"
+              className="min-h-9 px-3 text-xs"
+              onClick={() => setArtifactOnlyMode(true)}
+              title="작업물만 1920 x 1080 원본 캔버스로 봅니다. 단축키: Ctrl+Shift+P"
+            >
+              <Maximize2 size={14} />
+              작업물만 보기
+            </Button>
+            <span className="rounded-full border border-[var(--line)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
+              {ARTIFACT_VIEWPORT_WIDTH}x{ARTIFACT_VIEWPORT_HEIGHT}
+            </span>
           </div>
         </div>
 
