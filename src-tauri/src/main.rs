@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use base64::Engine;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -188,6 +189,7 @@ fn reset_workspace_design_state(workspace_path: String) -> Result<(), String> {
     write_starter_file(root.join(".designforge/runs.jsonl"), "")?;
     write_starter_file(root.join(".designforge/chat.jsonl"), "")?;
     write_starter_file(root.join(".designforge/activity.jsonl"), "")?;
+    write_starter_file(root.join(".designforge/attachments.json"), "[]")?;
 
     for relative_path in [
         ".designforge/brief.json",
@@ -196,6 +198,8 @@ fn reset_workspace_design_state(workspace_path: String) -> Result<(), String> {
         ".designforge/context.json",
         ".designforge/critique.json",
         ".designforge/preview.json",
+        ".designforge/tokens.json",
+        ".designforge/static-check.json",
         ".designforge/quality-audit.json",
         ".designforge/codex-prompts/latest.md",
         "prompts/latest.md",
@@ -244,6 +248,20 @@ fn write_file(
 }
 
 #[tauri::command]
+fn write_binary_file(
+    workspace_path: String,
+    relative_path: String,
+    base64_content: String,
+) -> Result<(), String> {
+    let root = canonical_workspace(&workspace_path)?;
+    let path = resolve_for_write(&root, &relative_path)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_content.trim())
+        .map_err(|error| format!("Could not decode binary file content: {error}"))?;
+    fs::write(path, bytes).map_err(|error| format!("Could not write binary file: {error}"))
+}
+
+#[tauri::command]
 fn check_codex(codex_path: String) -> Result<CommandResult, String> {
     run_command(Command::new(tool_path(&codex_path)).arg("--version"))
 }
@@ -271,6 +289,7 @@ async fn run_codex(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn run_codex_app_server(
     app: tauri::AppHandle,
     workspace_path: String,
@@ -512,6 +531,7 @@ fn clean_optional_cli_value(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_codex_app_server_blocking(
     app: tauri::AppHandle,
     workspace_path: String,
@@ -759,6 +779,7 @@ fn codex_turn_params(
     params
 }
 
+#[allow(clippy::too_many_arguments)]
 fn codex_rpc_request(
     reader: &mut BufReader<ChildStdout>,
     stdin: &mut ChildStdin,
@@ -1119,6 +1140,7 @@ fn export_handoff_blocking(workspace_path: String) -> Result<ExportInfo, String>
     for relative in handoff_files() {
         copy_if_exists(&root, &stage, relative)?;
     }
+    copy_dir_if_exists(&root, &stage, ".designforge/attachments")?;
 
     if zip_path.exists() {
         fs::remove_file(&zip_path)
@@ -1264,6 +1286,7 @@ fn main() {
             list_workspace_files,
             read_file,
             write_file,
+            write_binary_file,
             check_codex,
             run_codex,
             run_codex_app_server,
@@ -1766,6 +1789,7 @@ fn create_default_files(root: &Path) -> Result<(), String> {
         "artifacts",
         "prompts",
         ".designforge",
+        ".designforge/attachments",
         "outputs/screenshots",
         "outputs/console",
         "outputs/exports",
@@ -1783,6 +1807,7 @@ fn create_default_files(root: &Path) -> Result<(), String> {
     write_if_missing(root.join("designforge.config.json"), CONFIG_JSON)?;
     write_if_missing(root.join(".designforge/artifacts.json"), ARTIFACTS_JSON)?;
     write_if_missing(root.join(".designforge/anchors.json"), ANCHORS_JSON)?;
+    write_if_missing(root.join(".designforge/attachments.json"), "[]")?;
     write_if_missing(root.join(".designforge/comments.jsonl"), "")?;
     write_if_missing(root.join(".designforge/runs.jsonl"), "")?;
     write_if_missing(root.join(".designforge/chat.jsonl"), "")?;
@@ -1854,9 +1879,12 @@ fn handoff_files() -> &'static [&'static str] {
         ".designforge/project.json",
         ".designforge/artifacts.json",
         ".designforge/anchors.json",
+        ".designforge/attachments.json",
         ".designforge/clarification.json",
         ".designforge/brief.json",
         ".designforge/context.json",
+        ".designforge/tokens.json",
+        ".designforge/static-check.json",
         ".designforge/chat.jsonl",
         ".designforge/activity.jsonl",
         ".designforge/comments.jsonl",
@@ -1879,6 +1907,40 @@ fn copy_if_exists(root: &Path, stage: &Path, relative_path: &str) -> Result<(), 
     }
     fs::copy(&source, &target)
         .map_err(|error| format!("Could not copy export file {relative_path}: {error}"))?;
+    Ok(())
+}
+
+fn copy_dir_if_exists(root: &Path, stage: &Path, relative_path: &str) -> Result<(), String> {
+    let source = root.join(clean_relative(relative_path)?);
+    if !source.exists() {
+        return Ok(());
+    }
+    if !source.is_dir() {
+        return Err(format!("Export source is not a directory: {relative_path}"));
+    }
+    let target = stage.join(clean_relative(relative_path)?);
+    copy_dir_recursive(&source, &target)
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
+    fs::create_dir_all(target).map_err(|error| format!("Could not create export directory: {error}"))?;
+    for entry in fs::read_dir(source).map_err(|error| format!("Could not read export directory: {error}"))? {
+        let entry = entry.map_err(|error| format!("Could not read export directory entry: {error}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect export directory entry: {error}"))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &target_path)
+                .map_err(|error| format!("Could not copy export attachment: {error}"))?;
+        }
+    }
     Ok(())
 }
 
@@ -2195,7 +2257,7 @@ Act as an expert frontend designer working for the user. The user manages by cha
 2. Inspect CODEX_DESIGN.md, AGENTS.md, DESIGN.md, the generated screen, styles, assets, and relevant local files.
 3. Inspect .designforge/clarification.json, .designforge/brief.json, and .designforge/context.json when present.
 4. Update DESIGN.md before UI when the design system is thin, stale, or inconsistent.
-5. Build one strong artifact by default, or three comparable directions only when variation mode asks for it.
+5. Build one strong artifact by default and use attachments/context as source material before inventing design details.
 6. Keep the workspace compatible with TypeScript and Vite build checks.
 7. Summarize changed files, assumptions, and caveats briefly.
 

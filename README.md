@@ -9,6 +9,7 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 - Tauri v2 app shell with React, TypeScript, Vite, and Tailwind CSS
 - Chat-first DesignForge workbench with request intake, preview surface, pipeline evidence, artifacts, run history, quality evidence, and export actions
 - Project create/open flow with a side-panel project switcher
+- Project name input and recent-project search in the project panel
 - Starter workspace file generation
 - Project-scoped chat history, activity log, run history, `DESIGN.md`, prompts, generated artifact, preview evidence, and exports
 - Workspace-scoped file list/read/write commands
@@ -17,8 +18,12 @@ Heavy evidence stages are intentionally user-triggered. Verification, repair, pr
 - AI preflight clarification manifest at `.designforge/clarification.json`
 - Design brief manifest at `.designforge/brief.json`
 - Context manifest at `.designforge/context.json`
-- Generation modes: guided clarification and three-variation exploration
+- Token/component manifest at `.designforge/tokens.json`
+- Low-cost static source check at `.designforge/static-check.json`
+- Guided clarification flow that produces one strong design artifact by default
+- Chat attachments for image, text, Markdown, and other local source files, persisted under `.designforge/attachments/`
 - Component-level edit flow through preview click selection or anchor-list selection with `@anchor` and `<mentioned-element>` context
+- Direct source splice for exact anchored text replacements before invoking Codex
 - Codex CLI check, `codex app-server` wrapper runner, live event stream, and `codex exec` fallback
 - Codex runtime, model, and reasoning effort controls in the pipeline panel
 - Codex prompt handoff through `.designforge/codex-prompts/latest.md` to avoid Windows command-line length failures
@@ -146,12 +151,16 @@ designforge-workspace/
       project.json
       artifacts.json
       anchors.json
+      attachments/
+      attachments.json
       activity.jsonl
       clarification.json
       brief.json
       chat.jsonl
       comments.jsonl
       context.json
+      tokens.json
+      static-check.json
       critique.json
       preview.json
       quality-audit.json
@@ -168,7 +177,7 @@ The default chat path is intentionally narrow:
 1. Open or create the workspace.
 2. Inspect workspace context.
 3. Inspect `DESIGN.md` health without locking a generic system too early.
-4. Write `.designforge/context.json`.
+4. Write `.designforge/context.json`, `.designforge/tokens.json`, and `.designforge/static-check.json`.
 5. Run Codex preflight from `prompts/clarification-latest.md`.
 6. Write `.designforge/clarification.json` with request interpretation, known context, missing context, and tailored questions.
 7. If questions are needed, wait for the user's answer.
@@ -177,7 +186,8 @@ The default chat path is intentionally narrow:
 10. Run Codex generation.
 11. Refresh files and generated artifacts.
 12. Index `data-comment-anchor` values.
-13. Append a run record.
+13. Refresh token/component and static-check manifests.
+14. Append a run record.
 
 Chat messages are written to `.designforge/chat.jsonl`. Tool/status work activity is written to `.designforge/activity.jsonl`. The UI shows them in separate conversation and work-log tabs.
 
@@ -191,7 +201,7 @@ The app does not automatically verify, preview, capture, critique, quality-audit
 - `캡처`: capture browser console and screenshot evidence.
 - `크리틱`: run screenshot/console-driven critique and roll back if verification breaks.
 - `품질 검사`: run a quality audit grounded in `DESIGN.md`, clarification evidence, the design brief, context manifest, artifact, styles, and optional screenshot evidence.
-- `핸드오프 생성`: write `outputs/handoff/README.md` and package `outputs/exports/designforge-handoff.zip`.
+- `핸드오프 생성`: write `outputs/handoff/README.md` and package `outputs/exports/designforge-handoff.zip`, including attachment files and DesignForge evidence manifests.
 
 ## Verified Locally
 
@@ -219,6 +229,7 @@ Verified generated outputs:
 - Quality audit can run without screenshot evidence, but visual findings are stronger when preview capture exists.
 - Element-level feedback uses `@anchor-name` references from `.designforge/anchors.json`.
 - Preview click editing depends on generated elements carrying `data-comment-anchor`; unanchored elements can still be edited through chat but are not directly selectable.
+- Direct source splice applies only to exact text replacements that are unique inside the selected anchor; ambiguous edits fall back to Codex.
 - Screenshot capture requires Microsoft Edge or Chrome headless CLI.
 - Console capture requires Microsoft Edge or Chrome headless CLI.
 - Codex app-server output streams into the workbench; the exec fallback is still captured after completion.
@@ -227,7 +238,7 @@ Verified generated outputs:
 ## Next Steps
 
 1. Add an environment health panel for Node, npm, Rust, WebView2, Codex CLI, browser capture, and workspace dependency status.
-2. Add direct source splicing for simple text/color edits before invoking Codex.
+2. Expand direct source splicing from exact text replacements to safe color/class replacements.
 3. Add per-stage diagnostics for Codex sandbox fallback, repair attempts, critique, quality audit, capture, and export.
 4. Add richer export formats: standalone HTML first, then PDF/PPTX if needed.
 5. Add settings UI for workspace path, Codex path, package manager, and browser capture options.

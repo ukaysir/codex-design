@@ -1,5 +1,5 @@
 export type LogLevel = "info" | "success" | "error";
-export type GenerationMode = "guided" | "variations";
+export type GenerationMode = "guided";
 export type CodexRuntime = "app-server" | "exec";
 export type CodexEffort = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -116,11 +116,41 @@ export type DesignSystemHealth = {
 export type DesignContextManifest = {
   updatedAt: string;
   assetFiles: string[];
+  attachmentFiles: AttachmentInfo[];
   styleFiles: string[];
   sourceFiles: string[];
+  tokenManifestPath?: string;
+  staticCheckPath?: string;
   generatedArtifactExists: boolean;
   anchorCount: number;
   notes: string[];
+};
+
+export type DesignTokenManifest = {
+  updatedAt: string;
+  sourceFiles: string[];
+  colors: string[];
+  typography: string[];
+  spacingClasses: string[];
+  radiusClasses: string[];
+  shadowClasses: string[];
+  componentInventory: Array<{
+    anchorId: string;
+    line: number;
+    screenLabel: string;
+  }>;
+  notes: string[];
+};
+
+export type StaticCheckManifest = {
+  status: "passed" | "warning" | "failed";
+  updatedAt: string;
+  artifactPath: string;
+  checks: Array<{
+    id: string;
+    status: "passed" | "warning" | "failed";
+    message: string;
+  }>;
 };
 
 export type DesignBriefManifest = {
@@ -142,8 +172,19 @@ export type ClarificationQuestion = {
   id: string;
   question: string;
   why: string;
-  kind: "audience" | "brand" | "content" | "visual-direction" | "interaction" | "constraint" | "variation" | "asset" | "other";
+  kind: "audience" | "brand" | "content" | "visual-direction" | "interaction" | "constraint" | "asset" | "other";
   required: boolean;
+};
+
+export type AttachmentInfo = {
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  kind: "image" | "text" | "binary";
+  relativePath: string;
+  previewText?: string;
+  createdAt: string;
 };
 
 export type DesignClarificationManifest = {
@@ -211,6 +252,9 @@ export type RunRecord = {
   qualityAuditStatus?: QualityAuditManifest["status"];
   qualityAuditPromptPath?: string;
   qualityAuditManifestPath?: string;
+  tokenManifestPath?: string;
+  staticCheckPath?: string;
+  staticCheckStatus?: StaticCheckManifest["status"];
   previewUrl?: string;
   previewStatus?: PreviewManifest["status"];
   codexExitCode: number | null;

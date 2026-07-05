@@ -16,7 +16,7 @@ export type PromptOptions = {
 };
 
 const DESIGN_QUALITY_LENSES = [
-  "1. Request fit: identify the artifact type, fidelity, audience, constraints, and whether the user wants one direction or variations.",
+  "1. Request fit: identify the artifact type, fidelity, audience, constraints, and the single strongest direction to build.",
   "2. Source truth: inspect provided assets, design systems, UI kits, code, screenshots, and prior chat before inventing visual rules.",
   "3. System first: lock purpose, tone, differentiation, typography, color, spacing, component vocabulary, motion, and content rules in DESIGN.md before broad UI changes.",
   "4. Content economy: every section must earn its place; no filler, fake metrics, generic stats, or extra material the user did not ask for.",
@@ -37,13 +37,13 @@ const CODEX_DESIGN_PROTOCOL = [
   "For targeted edits, change only what was asked. Preserve unrelated layout, spacing, typography, colors, content, screen labels, and comment anchors.",
   "Treat the current DESIGN.md and generated artifact as the continuing design system. Revise inside that system unless the user explicitly asks for a new direction, reset, or replacement.",
   "When the request names a data-comment-anchor or includes a mentioned-element block, edit the matching semantic region first. Do not regenerate the whole screen for a component-level change.",
-  "For new work, explore AGENTS.md, DESIGN.md, existing generated code, assets, and any relevant local files before editing.",
+  "For new work, explore AGENTS.md, DESIGN.md, existing generated code, attachments, assets, and any relevant local files before editing.",
   "Read DesignForge's brief and context manifests when present; they summarize request intent, assets, design-system health, and the chosen generation mode.",
   "Create or update the design system first: purpose, tone, visual direction, color, typography, spacing, components, motion, accessibility, content rules, and assumptions.",
   "Keep a durable component map in DESIGN.md: major regions, anchor ids, reusable patterns, and what should remain consistent across future revisions.",
   "If no brand or existing design system exists, commit to a clear aesthetic direction before coding: purpose, tone, differentiation, and the one memorable visual idea.",
   "Avoid AI slop: filler sections, fake metrics, generic SaaS layouts, decorative gradients without purpose, emoji unless the brand uses it, left-border accent cards, and timid evenly-distributed palettes.",
-  "Use provided or existing assets when available. Do not invent logos or hand-draw asset replacements when a real asset should exist.",
+  "Use provided attachments or existing assets when available. Text/Markdown attachments are source evidence; image attachments are visual source material. Do not invent logos or hand-draw asset replacements when a real asset should exist.",
   "Use semantic HTML, accessible controls, visible focus states, readable contrast, and hit targets appropriate to the surface.",
   "Use flex/grid with gap for UI groups. Keep text editable and literal where practical. Avoid unnecessary component splitting.",
   "Add data-screen-label to high-level screen roots. Add stable data-comment-anchor values to major semantic regions and preserve existing values on semantic equivalents.",
@@ -74,8 +74,11 @@ Required reading before edits:
 4. ${briefPath}
 5. ${contextPath}
 6. ${clarificationPath}
-7. ${artifactPath}
-8. Any local assets, styles, or source files directly relevant to the request
+7. .designforge/tokens.json if present
+8. .designforge/static-check.json if present
+9. ${artifactPath}
+10. Any attached files listed in ${contextPath}
+11. Any local assets, styles, or source files directly relevant to the request
 
 Design brief:
 ${options.briefContext?.trim() || "(brief manifest unavailable)"}
@@ -107,8 +110,7 @@ Autonomous workflow:
 
 Generation mode:
 - Current mode: ${generationMode}
-- guided: use the preflight chat answers as design direction, produce one strong artifact, and record any remaining unresolved questions and assumptions in ${designSystemPath}.
-- variations: create three clearly different visual/UX directions in the same primary artifact, labelled with data-comment-anchor values such as variation-a, variation-b, and variation-c. Keep the comparison scannable and do not create extra files unless necessary.
+- guided: use the preflight chat answers and attachments as design direction, produce one strong artifact, and record any remaining unresolved questions and assumptions in ${designSystemPath}.
 
 User request:
 ${userRequest.trim() || "Create a focused frontend screen."}
@@ -153,7 +155,6 @@ Priority:
 - Follow claude-design.md behavior: understand user needs, inspect context first, ask questions for new or ambiguous work, skip questions for small tweaks or when enough information exists.
 - Questions must be specific to this request and the current design system. Do not use generic reusable questions.
 - Ask about the design system only after interpreting the product/surface/audience/constraints.
-- If the user asked for variations, ask what the variations should explore unless the request already says it.
 - Do not edit ${artifactPath}, ${designSystemPath}, src/styles.css, package files, or app shell files.
 - Write only ${clarificationPath} as JSON. No markdown files. No prose-only answer.
 
@@ -162,8 +163,11 @@ Read before deciding:
 2. CODEX_DESIGN.md
 3. ${designSystemPath}
 4. ${contextPath}
-5. ${artifactPath} if present
-6. Relevant local assets/style files listed in ${contextPath}
+5. .designforge/tokens.json if present
+6. .designforge/static-check.json if present
+7. ${artifactPath} if present
+8. Attached files listed in ${contextPath}
+9. Relevant local assets/style files listed in ${contextPath}
 
 Generation mode requested by user: ${mode}
 
@@ -187,10 +191,10 @@ ${DESIGN_QUALITY_LENSES}
 
 Decision rules:
 - For small targeted edits, set shouldAskQuestions=false unless the selected element/source is unclear.
-- For new screens, redesigns, vague product requests, unclear audience, missing brand/design-system direction, missing assets, or variation requests, set shouldAskQuestions=true.
+- For new screens, redesigns, vague product requests, unclear audience, missing brand/design-system direction, missing assets, or unclear attachment usage, set shouldAskQuestions=true.
 - Ask 6-10 questions when needed. For broad new projects, prefer 10 focused questions if they materially improve design quality.
 - Every question must include a reason in "why" showing how the answer changes design decisions.
-- Prefer concrete design-system questions: audience, brand/source of truth, visual direction, content proof, interaction states, assets, density, variation axis, constraints, expected states, responsive target, editability, and handoff needs.
+- Prefer concrete design-system questions: audience, brand/source of truth, visual direction, content proof, interaction states, assets, density, constraints, expected states, responsive target, editability, and handoff needs.
 - Do not ask questions whose answers are already clear from the request, DESIGN.md, or context manifest.
 - If enough context exists, explain the assumptions in assumptionsIfSkipped.
 
@@ -342,8 +346,10 @@ Read first:
 1. CODEX_DESIGN.md if present
 2. AGENTS.md
 3. ${designSystemPath}
-4. ${artifactPath}
-5. src/styles.css if relevant
+4. .designforge/tokens.json if present
+5. .designforge/static-check.json if present
+6. ${artifactPath}
+7. src/styles.css if relevant
 
 Original user request:
 ${userRequest.trim() || "Create a focused frontend screen."}
@@ -378,9 +384,11 @@ Required reading before edits:
 1. CODEX_DESIGN.md if present
 2. AGENTS.md
 3. ${designSystemPath}
-4. ${artifactPath}
-5. src/styles.css
-6. Local assets used by the screen
+4. .designforge/tokens.json if present
+5. .designforge/static-check.json if present
+6. ${artifactPath}
+7. src/styles.css
+8. Local assets used by the screen
 
 Screenshot evidence:
 - ${screenshotPath}
@@ -433,8 +441,10 @@ Read first:
 3. ${designSystemPath}
 4. ${briefPath}
 5. ${contextPath}
-6. ${artifactPath}
-7. src/styles.css
+6. .designforge/tokens.json if present
+7. .designforge/static-check.json if present
+8. ${artifactPath}
+9. src/styles.css
 
 Evidence:
 - Screenshot: ${screenshotPath ?? "(not captured)"}

@@ -10,11 +10,14 @@ import {
   MessageCircle,
   Minimize2,
   MousePointer2,
+  Paperclip,
   Play,
   Plus,
+  Search,
   Send,
   Square,
   Terminal,
+  X,
   XCircle,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
@@ -33,6 +36,7 @@ import { WORKSPACE_SELECTION_APP_TSX } from "./lib/workspace-bridge";
 import type {
   AnchorInfo,
   AnchorManifest,
+  AttachmentInfo,
   CommentRecord,
   CodexAppServerEvent,
   CodexEffort,
@@ -44,8 +48,8 @@ import type {
   DesignClarificationManifest,
   DesignContextManifest,
   DesignSystemHealth,
+  DesignTokenManifest,
   ExportInfo,
-  GenerationMode,
   LogEvent,
   LogLevel,
   PreviewInfo,
@@ -55,6 +59,7 @@ import type {
   RunRecord,
   ScreenshotInfo,
   Settings,
+  StaticCheckManifest,
   WorkspaceFile,
   WorkspaceInfo,
 } from "./types";
@@ -80,6 +85,8 @@ const PROJECT_MANIFEST_PATH = ".designforge/project.json";
 const CODEX_SESSION_PATH = ".designforge/codex-session.json";
 const BRIEF_PATH = ".designforge/brief.json";
 const CONTEXT_PATH = ".designforge/context.json";
+const TOKEN_MANIFEST_PATH = ".designforge/tokens.json";
+const STATIC_CHECK_PATH = ".designforge/static-check.json";
 const CLARIFICATION_PATH = ".designforge/clarification.json";
 const QUALITY_AUDIT_PATH = ".designforge/quality-audit.json";
 const PROMPT_PATH = "prompts/latest.md";
@@ -93,6 +100,8 @@ const HANDOFF_PATH = "outputs/handoff/README.md";
 const EXPORT_PATH = "outputs/exports/designforge-handoff.zip";
 const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
 const COMMENTS_PATH = ".designforge/comments.jsonl";
+const ATTACHMENTS_MANIFEST_PATH = ".designforge/attachments.json";
+const ATTACHMENTS_DIR = ".designforge/attachments";
 const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
 const CONSOLE_PATH = "outputs/console/latest.json";
 const ARTIFACT_VIEWPORT_WIDTH = 1920;
@@ -109,6 +118,7 @@ type ChatMessage = {
   createdAt: string;
   kind?: ChatKind;
   level?: LogLevel;
+  attachments?: AttachmentInfo[];
 };
 
 type StepStatus = "idle" | "active" | "done" | "error";
@@ -133,8 +143,8 @@ type PreviewSelection = {
 
 type GuidedDraft = {
   request: string;
-  mode: GenerationMode;
   clarification: DesignClarificationManifest;
+  attachments: AttachmentInfo[];
   createdAt: string;
 };
 
@@ -145,6 +155,7 @@ type RunRequestOptions = {
   anchorId?: string;
   screenLabel?: string;
   clarification?: DesignClarificationManifest | null;
+  attachments?: AttachmentInfo[];
 };
 
 type CodexSessionManifest = {
@@ -167,6 +178,8 @@ type CodexStreamState = {
 
 const CODEX_MODEL_OPTIONS = ["", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"] as const;
 const CODEX_EFFORT_OPTIONS: CodexEffort[] = ["", "minimal", "low", "medium", "high", "xhigh"];
+const MAX_ATTACHMENT_PREVIEW_CHARS = 2400;
+const MAX_ATTACHMENT_READ_BYTES = 8 * 1024 * 1024;
 
 const START_STEPS: PipelineStep[] = [
   { id: "context", label: "Context", detail: "Create or open the workspace", status: "idle" },
@@ -234,7 +247,7 @@ function createIntroMessages(): ChatMessage[] {
       id: "intro",
       role: "assistant",
       content:
-        "만들고 싶은 화면을 말해 주세요. 기본 흐름에서는 먼저 필요한 질문을 하고, 답변까지 묶어 실제 앱 파일을 변경합니다. 필요하면 3안 비교 생성을 선택할 수 있습니다.",
+        "만들고 싶은 화면을 말해 주세요. 필요한 경우 질문을 먼저 만들고, 답변과 첨부파일까지 묶어 실제 앱 파일을 변경합니다.",
       createdAt: now(),
       kind: "summary",
       level: "info",
@@ -379,6 +392,63 @@ function isPreviewSelection(value: unknown): value is PreviewSelection & { sourc
   return data.source === "designforge-preview-select" && typeof data.anchorId === "string" && data.anchorId.length > 0;
 }
 
+function attachmentKind(file: File): AttachmentInfo["kind"] {
+  if (file.type.startsWith("image/")) return "image";
+  if (
+    file.type.startsWith("text/") ||
+    /\.(md|mdx|txt|json|csv|ts|tsx|js|jsx|css|scss|html|xml|yml|yaml|toml|ini|env|log)$/i.test(file.name)
+  ) {
+    return "text";
+  }
+  return "binary";
+}
+
+function safeAttachmentName(name: string) {
+  const parts = name.trim().replace(/\\/g, "/").split("/");
+  const filename = parts[parts.length - 1] || "attachment";
+  const clean = filename.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return clean || "attachment";
+}
+
+function attachmentRelativePath(id: string, name: string) {
+  return `${ATTACHMENTS_DIR}/${id}-${safeAttachmentName(name)}`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function trimAttachmentPreview(value: string) {
+  const clean = value.replace(/\r\n/g, "\n").trim();
+  return clean.length > MAX_ATTACHMENT_PREVIEW_CHARS ? `${clean.slice(0, MAX_ATTACHMENT_PREVIEW_CHARS)}\n...truncated` : clean;
+}
+
+function formatAttachmentsForPrompt(attachments: AttachmentInfo[]) {
+  if (!attachments.length) return "";
+  return attachments
+    .map((item, index) => {
+      const preview = item.previewText ? `\nPreview:\n${item.previewText}` : "";
+      return `${index + 1}. ${item.name}\n- kind: ${item.kind}\n- mediaType: ${item.mediaType || "unknown"}\n- size: ${item.size} bytes\n- workspacePath: ${item.relativePath}${preview}`;
+    })
+    .join("\n\n");
+}
+
+function requestWithAttachments(request: string, attachments: AttachmentInfo[]) {
+  if (!attachments.length) return request;
+  return `${request.trim()}
+
+Attached files supplied by the user:
+${formatAttachmentsForPrompt(attachments)}
+
+Use these attachments as source material. For image attachments, inspect the saved workspace file path. For text or Markdown attachments, treat the preview above and the saved file as source truth.`;
+}
+
 function buildTargetedComponentRequest(anchorId: string, screenLabel: string, note: string, selection: PreviewSelection | null) {
   const elementLines = [
     "<mentioned-element>",
@@ -496,14 +566,14 @@ function inferAudienceAssumption(request: string) {
 
 function inferPurposeAssumption(request: string) {
   if (/수정|변경|바꿔|edit|fix|adjust/i.test(request)) return "Refine the existing artifact while preserving the current system.";
-  if (/3안|variation|옵션|비교/i.test(request)) return "Explore multiple strong directions before committing to one visual system.";
   return "Create a focused, high-craft frontend screen that can be iterated through chat.";
 }
 
-function qualityBarForMode(mode: GenerationMode) {
-  const base = [
+function qualityBar() {
+  return [
     "The request is translated into explicit artifact type, audience, fidelity, constraints, and success criteria.",
     "Provided assets, code, design systems, screenshots, and prior chat are treated as source truth before invention.",
+    "Attached files are read as source material before visual or content decisions are invented.",
     "Primary hierarchy is legible within five seconds.",
     "The aesthetic direction is specific, not a generic AI SaaS default.",
     "Every section earns its place; no filler copy or fake metrics.",
@@ -511,10 +581,8 @@ function qualityBarForMode(mode: GenerationMode) {
     "Expected interaction states and responsive behavior are defined when the surface implies a real product.",
     "Assets are real or clearly marked assumptions; no invented logos, icons, or copyrighted recreation.",
     "Text fits, controls are accessible, and anchors are stable.",
+    "Open questions and assumptions must be explicit in DESIGN.md.",
   ];
-  if (mode === "variations") return [...base, "Three directions must be meaningfully different and comparable in one artifact."];
-  if (mode === "guided") return [...base, "Open questions and assumptions must be explicit in DESIGN.md."];
-  return base;
 }
 
 function formatBriefForPrompt(brief: DesignBriefManifest) {
@@ -526,8 +594,11 @@ function formatContextForPrompt(context: DesignContextManifest) {
     {
       updatedAt: context.updatedAt,
       assetFiles: context.assetFiles.slice(0, 30),
+      attachmentFiles: context.attachmentFiles?.slice(0, 30) ?? [],
       styleFiles: context.styleFiles.slice(0, 20),
       sourceFiles: context.sourceFiles.slice(0, 30),
+      tokenManifestPath: context.tokenManifestPath,
+      staticCheckPath: context.staticCheckPath,
       generatedArtifactExists: context.generatedArtifactExists,
       anchorCount: context.anchorCount,
       notes: context.notes,
@@ -541,8 +612,138 @@ function formatClarificationForPrompt(clarification: DesignClarificationManifest
   return clarification ? JSON.stringify(clarification, null, 2) : "";
 }
 
+function uniqueLimited(values: string[], limit = 80) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).slice(0, limit);
+}
+
+function regexValues(source: string, pattern: RegExp, limit = 80) {
+  return uniqueLimited(
+    Array.from(source.matchAll(pattern)).map((match) => match[1] || match[0]),
+    limit,
+  );
+}
+
+function lineNumberAt(source: string, index: number) {
+  return source.slice(0, index).split(/\r?\n/).length;
+}
+
+function nearestScreenLabel(source: string, index: number) {
+  const before = source.slice(0, index);
+  const matches = Array.from(before.matchAll(/data-screen-label\s*=\s*["']([^"']+)["']/g));
+  return matches[matches.length - 1]?.[1]?.trim() || "Generated Screen";
+}
+
+function extractComponentInventory(source: string): DesignTokenManifest["componentInventory"] {
+  const seen = new Set<string>();
+  const inventory: DesignTokenManifest["componentInventory"] = [];
+  for (const match of source.matchAll(/data-comment-anchor\s*=\s*["']([^"']+)["']/g)) {
+    const anchorId = match[1].trim();
+    if (!anchorId || seen.has(anchorId)) continue;
+    seen.add(anchorId);
+    inventory.push({
+      anchorId,
+      line: lineNumberAt(source, match.index ?? 0),
+      screenLabel: nearestScreenLabel(source, match.index ?? 0),
+    });
+  }
+  return inventory;
+}
+
+function extractTailwindClasses(source: string, predicate: (token: string) => boolean, limit = 80) {
+  const tokens: string[] = [];
+  for (const match of source.matchAll(/["'`]([^"'`]+)["'`]/g)) {
+    tokens.push(
+      ...match[1]
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token && !token.includes("${") && predicate(token)),
+    );
+  }
+  return uniqueLimited(tokens, limit);
+}
+
+function extractTypographyEvidence(designSystem: string, styles: string, source: string) {
+  const designLines = designSystem
+    .split(/\r?\n/)
+    .filter((line) => /font|type|typography|서체|폰트|leading|line-height|tracking/i.test(line))
+    .slice(0, 24);
+  const styleFamilies = regexValues(styles, /font-family\s*:\s*([^;\n]+)/gi, 24);
+  const classTokens = extractTailwindClasses(
+    source,
+    (token) => /^(font|text|leading|tracking)-/.test(token),
+    40,
+  );
+  return uniqueLimited([...styleFamilies, ...classTokens, ...designLines], 80);
+}
+
+function staticCheckTone(status?: StaticCheckManifest["status"]): "lime" | "amber" | "danger" | "steel" {
+  if (status === "passed") return "lime";
+  if (status === "warning") return "amber";
+  if (status === "failed") return "danger";
+  return "steel";
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseDirectReplacement(note: string) {
+  const patterns = [
+    /["'“”‘’]([^"'“”‘’]{1,220})["'“”‘’]\s*(?:을|를)?\s*["'“”‘’]([^"'“”‘’]{1,220})["'“”‘’]\s*(?:로|으로)\s*(?:변경|바꿔|교체)?/i,
+    /["'“”‘’]([^"'“”‘’]{1,220})["'“”‘’]\s*(?:->|=>|to)\s*["'“”‘’]([^"'“”‘’]{1,220})["'“”‘’]/i,
+    /replace\s+["'“”‘’]([^"'“”‘’]{1,220})["'“”‘’]\s+(?:with|to)\s+["'“”‘’]([^"'“”‘’]{1,220})["'“”‘’]/i,
+  ];
+  for (const pattern of patterns) {
+    const match = note.match(pattern);
+    if (match?.[1] && match?.[2] && match[1] !== match[2]) {
+      return { oldText: match[1], newText: match[2] };
+    }
+  }
+  return null;
+}
+
+function countOccurrences(value: string, needle: string) {
+  if (!needle) return 0;
+  let count = 0;
+  let index = 0;
+  while ((index = value.indexOf(needle, index)) !== -1) {
+    count += 1;
+    index += needle.length;
+  }
+  return count;
+}
+
+function lineStartOffsets(source: string) {
+  const offsets = [0];
+  for (const match of source.matchAll(/\r?\n/g)) {
+    offsets.push((match.index ?? 0) + match[0].length);
+  }
+  return offsets;
+}
+
+function applyAnchoredTextReplacement(source: string, anchorId: string, oldText: string, newText: string) {
+  const match = source.match(new RegExp(`data-comment-anchor\\s*=\\s*["']${escapeRegex(anchorId)}["']`));
+  if (match?.index === undefined) return null;
+
+  const offsets = lineStartOffsets(source);
+  const anchorLine = lineNumberAt(source, match.index) - 1;
+  const startLine = Math.max(0, anchorLine - 30);
+  const endLine = Math.min(offsets.length, anchorLine + 90);
+  const startOffset = offsets[startLine] ?? 0;
+  const endOffset = offsets[endLine] ?? source.length;
+  const region = source.slice(startOffset, endOffset);
+  if (countOccurrences(region, oldText) !== 1) return null;
+
+  const relativeIndex = region.indexOf(oldText);
+  const absoluteIndex = startOffset + relativeIndex;
+  return {
+    nextSource: `${source.slice(0, absoluteIndex)}${newText}${source.slice(absoluteIndex + oldText.length)}`,
+    line: lineNumberAt(source, absoluteIndex),
+  };
+}
+
 function normalizeQuestionKind(value: unknown): DesignClarificationManifest["questions"][number]["kind"] {
-  const allowed = new Set(["audience", "brand", "content", "visual-direction", "interaction", "constraint", "variation", "asset", "other"]);
+  const allowed = new Set(["audience", "brand", "content", "visual-direction", "interaction", "constraint", "asset", "other"]);
   return typeof value === "string" && allowed.has(value) ? (value as DesignClarificationManifest["questions"][number]["kind"]) : "other";
 }
 
@@ -572,7 +773,7 @@ function normalizeClarificationManifest(value: unknown, request: string): Design
     status: data.status === "skipped" || data.status === "failed" ? data.status : "ready",
     updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
     request: typeof data.request === "string" && data.request.trim() ? data.request : request,
-    mode: data.mode === "variations" ? "variations" : "guided",
+    mode: "guided",
     promptPath: typeof data.promptPath === "string" ? data.promptPath : CLARIFICATION_PROMPT_PATH,
     manifestPath: typeof data.manifestPath === "string" ? data.manifestPath : CLARIFICATION_PATH,
     shouldAskQuestions: typeof data.shouldAskQuestions === "boolean" ? data.shouldAskQuestions && questions.length > 0 : questions.length > 0,
@@ -626,12 +827,14 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [workspacePath, setWorkspacePath] = useState(settings.lastWorkspacePath);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [projectSearch, setProjectSearch] = useState("");
+  const [newProjectName, setNewProjectName] = useState("");
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatPanelTab, setChatPanelTab] = useState<ChatPanelTab>("conversation");
-  const [generationMode, setGenerationMode] = useState<GenerationMode>("guided");
   const [guidedDraft, setGuidedDraft] = useState<GuidedDraft | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentInfo[]>([]);
   const [steps, setSteps] = useState<PipelineStep[]>(START_STEPS);
   const [messages, setMessages] = useState<ChatMessage[]>(createIntroMessages);
   const [logs, setLogs] = useState<LogEvent[]>([
@@ -658,6 +861,8 @@ export default function App() {
   const [manualExportPath, setManualExportPath] = useState("");
   const [latestBrief, setLatestBrief] = useState<DesignBriefManifest | null>(null);
   const [latestContext, setLatestContext] = useState<DesignContextManifest | null>(null);
+  const [latestTokenManifest, setLatestTokenManifest] = useState<DesignTokenManifest | null>(null);
+  const [latestStaticCheck, setLatestStaticCheck] = useState<StaticCheckManifest | null>(null);
   const [latestClarification, setLatestClarification] = useState<DesignClarificationManifest | null>(null);
   const [codexStream, setCodexStream] = useState<CodexStreamState>({
     runId: "",
@@ -682,6 +887,8 @@ export default function App() {
             CLARIFICATION_PATH,
             BRIEF_PATH,
             CONTEXT_PATH,
+            TOKEN_MANIFEST_PATH,
+            STATIC_CHECK_PATH,
             QUALITY_AUDIT_PATH,
             CLARIFICATION_PROMPT_PATH,
             PROMPT_PATH,
@@ -763,6 +970,8 @@ export default function App() {
         await loadDesignClarification(workspacePath);
         await loadDesignBrief(workspacePath);
         await loadDesignContext(workspacePath);
+        await loadTokenManifest(workspacePath);
+        await loadStaticCheck(workspacePath);
         await loadQualityAudit(workspacePath);
       } catch (error) {
         pushLog("error", `Could not load workspace state: ${textFromError(error)}`);
@@ -835,6 +1044,7 @@ export default function App() {
     content: string,
     kind: ChatKind = "chat",
     level?: LogLevel,
+    attachments?: AttachmentInfo[],
   ): ChatMessage {
     return {
       id: crypto.randomUUID(),
@@ -843,6 +1053,7 @@ export default function App() {
       createdAt: new Date().toISOString(),
       kind,
       level,
+      attachments: attachments?.length ? attachments : undefined,
     };
   }
 
@@ -856,19 +1067,15 @@ export default function App() {
     return message;
   }
 
-  function selectGenerationMode(mode: GenerationMode) {
-    setGenerationMode(mode);
-    if (mode !== "guided") setGuidedDraft(null);
-  }
-
   async function appendChatMessage(
     path: string,
     role: ChatMessage["role"],
     content: string,
     kind: ChatKind = "chat",
     level?: LogLevel,
+    attachments?: AttachmentInfo[],
   ) {
-    const message = createChatMessage(role, content, kind, level);
+    const message = createChatMessage(role, content, kind, level, attachments);
     const isActivity = isActivityMessage(message);
     const relativePath = isActivity ? ACTIVITY_PATH : CHAT_PATH;
     if (isActivity) {
@@ -928,6 +1135,94 @@ export default function App() {
     }
   }
 
+  async function loadAttachmentManifest(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: ATTACHMENTS_MANIFEST_PATH });
+      const parsed = JSON.parse(raw) as unknown;
+      const records = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === "object" && Array.isArray((parsed as { attachments?: unknown }).attachments)
+          ? (parsed as { attachments: unknown[] }).attachments
+          : [];
+      return records.filter((item): item is AttachmentInfo => {
+        if (!item || typeof item !== "object") return false;
+        const value = item as Partial<AttachmentInfo>;
+        return (
+          typeof value.id === "string" &&
+          typeof value.name === "string" &&
+          typeof value.relativePath === "string" &&
+          (value.kind === "image" || value.kind === "text" || value.kind === "binary")
+        );
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  async function saveAttachmentManifest(path: string, attachments: AttachmentInfo[]) {
+    const unique = Array.from(new Map(attachments.map((item) => [item.id, item])).values());
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: ATTACHMENTS_MANIFEST_PATH,
+      content: JSON.stringify({ updatedAt: new Date().toISOString(), attachments: unique }, null, 2),
+    });
+    return unique;
+  }
+
+  async function addPendingFiles(files: FileList | null) {
+    const selected = Array.from(files ?? []);
+    if (!selected.length || busy) return;
+
+    try {
+      const path = workspacePath || (await ensureWorkspace("Attached DesignForge Files"));
+      const existing = await loadAttachmentManifest(path);
+      const nextAttachments: AttachmentInfo[] = [];
+
+      for (const file of selected) {
+        if (file.size > MAX_ATTACHMENT_READ_BYTES) {
+          pushLog("error", `Attachment skipped because it is too large: ${file.name}`);
+          continue;
+        }
+        const id = crypto.randomUUID();
+        const kind = attachmentKind(file);
+        const relativePath = attachmentRelativePath(id.slice(0, 8), file.name);
+        let previewText: string | undefined;
+
+        if (kind === "text") {
+          const text = await file.text();
+          previewText = trimAttachmentPreview(text);
+          await callTauri("write_file", { workspacePath: path, relativePath, content: text });
+        } else {
+          const base64Content = arrayBufferToBase64(await file.arrayBuffer());
+          await callTauri("write_binary_file", { workspacePath: path, relativePath, base64Content });
+        }
+
+        nextAttachments.push({
+          id,
+          name: file.name,
+          mediaType: file.type || "application/octet-stream",
+          size: file.size,
+          kind,
+          relativePath,
+          previewText,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      if (!nextAttachments.length) return;
+      const saved = await saveAttachmentManifest(path, [...existing, ...nextAttachments]);
+      setPendingAttachments((current) => [...current, ...nextAttachments]);
+      await refreshFiles(path);
+      pushLog("success", `Attached ${nextAttachments.length} file(s). Total saved attachments: ${saved.length}.`);
+    } catch (error) {
+      pushLog("error", `Could not attach file: ${textFromError(error)}`);
+    }
+  }
+
+  function removePendingAttachment(id: string) {
+    setPendingAttachments((current) => current.filter((item) => item.id !== id));
+  }
+
   async function loadDesignBrief(path: string) {
     try {
       const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: BRIEF_PATH });
@@ -948,6 +1243,30 @@ export default function App() {
       return manifest;
     } catch {
       setLatestContext(null);
+      return null;
+    }
+  }
+
+  async function loadTokenManifest(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: TOKEN_MANIFEST_PATH });
+      const manifest = JSON.parse(raw) as DesignTokenManifest;
+      setLatestTokenManifest(manifest);
+      return manifest;
+    } catch {
+      setLatestTokenManifest(null);
+      return null;
+    }
+  }
+
+  async function loadStaticCheck(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: STATIC_CHECK_PATH });
+      const manifest = JSON.parse(raw) as StaticCheckManifest;
+      setLatestStaticCheck(manifest);
+      return manifest;
+    } catch {
+      setLatestStaticCheck(null);
       return null;
     }
   }
@@ -1007,12 +1326,14 @@ export default function App() {
     setComponentEdit("");
     setGuidedDraft(null);
     setInput("");
-    setGenerationMode("guided");
+    setPendingAttachments([]);
     setChatPanelTab("conversation");
     setMessages(createIntroMessages());
     setLatestClarification(null);
     setLatestBrief(null);
     setLatestContext(null);
+    setLatestTokenManifest(null);
+    setLatestStaticCheck(null);
     setManualVerifyResult(null);
     setManualConsoleInfo(null);
     setManualScreenshotInfo(null);
@@ -1340,33 +1661,39 @@ export default function App() {
   async function writeDesignContextManifest(path: string) {
     const workspaceFiles = await callTauri<WorkspaceFile[]>("list_workspace_files", { workspacePath: path });
     const loadedAnchors = anchorManifest ?? (await loadAnchorManifest(path));
+    const attachmentFiles = await loadAttachmentManifest(path);
+    const tokenManifest = await writeTokenManifest(path);
+    const staticCheck = await writeStaticCheckManifest(path);
+    const filePaths = workspaceFiles.filter((file) => !file.isDirectory).map((file) => file.relativePath);
     const artifactExists = workspaceFiles.some((file) => file.relativePath === ARTIFACT_PATH);
-    const assetFiles = workspaceFiles
-      .filter((file) => !file.isDirectory)
-      .map((file) => file.relativePath)
+    const assetFiles = filePaths
       .filter((file) => file.startsWith("assets/") || /\.(png|jpe?g|webp|gif|svg|ico|avif|ttf|otf|woff2?)$/i.test(file))
       .slice(0, 80);
-    const styleFiles = workspaceFiles
-      .filter((file) => !file.isDirectory)
-      .map((file) => file.relativePath)
+    const styleFiles = filePaths
       .filter((file) => /\.(css|scss|sass|less|cjs|mjs|config\.js|config\.ts)$/i.test(file) || file.includes("tailwind"))
       .slice(0, 80);
-    const sourceFiles = workspaceFiles
-      .filter((file) => !file.isDirectory)
-      .map((file) => file.relativePath)
+    const sourceFiles = filePaths
       .filter((file) => file.startsWith("src/") && /\.(tsx?|jsx?)$/i.test(file))
       .slice(0, 100);
     const notes = [
       assetFiles.length ? `${assetFiles.length} local asset files available.` : "No local assets found; avoid inventing logos or fake imagery.",
+      attachmentFiles.length
+        ? `${attachmentFiles.length} user attachment files available; inspect them as source material.`
+        : "No user attachments saved for this project.",
       styleFiles.length ? `${styleFiles.length} style/config files available.` : "No shared style files found beyond defaults.",
       artifactExists ? `${ARTIFACT_PATH} exists.` : `${ARTIFACT_PATH} is missing and should be created.`,
       loadedAnchors?.anchors.length ? `${loadedAnchors.anchors.length} comment anchors indexed.` : "No anchors indexed yet.",
+      `${TOKEN_MANIFEST_PATH} records ${tokenManifest.colors.length} color values, ${tokenManifest.typography.length} typography signals, and ${tokenManifest.componentInventory.length} component anchors.`,
+      `${STATIC_CHECK_PATH} status is ${staticCheck.status}.`,
     ];
     const manifest: DesignContextManifest = {
       updatedAt: new Date().toISOString(),
       assetFiles,
+      attachmentFiles,
       styleFiles,
       sourceFiles,
+      tokenManifestPath: TOKEN_MANIFEST_PATH,
+      staticCheckPath: STATIC_CHECK_PATH,
       generatedArtifactExists: artifactExists,
       anchorCount: loadedAnchors?.anchors.length ?? 0,
       notes,
@@ -1383,7 +1710,6 @@ export default function App() {
   async function writeDesignBriefManifest(
     path: string,
     request: string,
-    mode: GenerationMode,
     designSystemHealth: DesignSystemHealth,
     context: DesignContextManifest,
     clarification: DesignClarificationManifest | null = latestClarification,
@@ -1409,11 +1735,11 @@ export default function App() {
     const manifest: DesignBriefManifest = {
       updatedAt: new Date().toISOString(),
       request,
-      mode,
+      mode: "guided",
       classification,
       audienceAssumption,
       purposeAssumption,
-      qualityBar: qualityBarForMode(mode),
+      qualityBar: qualityBar(),
       questionsToConsider: clarification?.questions.map((question) => `${question.question} (${question.why})`) ?? [],
       assumptions,
       designSystemHealth,
@@ -1474,6 +1800,136 @@ export default function App() {
     return manifest;
   }
 
+  async function readOptionalWorkspaceFile(path: string, relativePath: string) {
+    try {
+      return await callTauri<string>("read_file", { workspacePath: path, relativePath });
+    } catch {
+      return "";
+    }
+  }
+
+  async function writeTokenManifest(path: string) {
+    const [designSystem, styles, artifact] = await Promise.all([
+      readOptionalWorkspaceFile(path, "DESIGN.md"),
+      readOptionalWorkspaceFile(path, "src/styles.css"),
+      readOptionalWorkspaceFile(path, ARTIFACT_PATH),
+    ]);
+    const combined = [designSystem, styles, artifact].join("\n");
+    const colors = regexValues(combined, /#[0-9a-f]{3,8}\b|oklch\([^)]+\)|rgba?\([^)]+\)/gi, 96);
+    const typography = extractTypographyEvidence(designSystem, styles, artifact);
+    const spacingClasses = extractTailwindClasses(
+      artifact,
+      (token) => /^(?:-?m[trblxy]?|-?p[trblxy]?|gap|space-[xy]|inset|top|right|bottom|left|w|h|min-w|min-h|max-w|max-h)-/.test(token),
+      96,
+    );
+    const radiusClasses = extractTailwindClasses(artifact, (token) => /^rounded(?:-|$)/.test(token), 48);
+    const shadowClasses = extractTailwindClasses(artifact, (token) => /^shadow(?:-|$|\[)/.test(token), 48);
+    const componentInventory = extractComponentInventory(artifact);
+    const sourceFiles = [
+      designSystem ? "DESIGN.md" : "",
+      styles ? "src/styles.css" : "",
+      artifact ? ARTIFACT_PATH : "",
+    ].filter(Boolean);
+    const manifest: DesignTokenManifest = {
+      updatedAt: new Date().toISOString(),
+      sourceFiles,
+      colors,
+      typography,
+      spacingClasses,
+      radiusClasses,
+      shadowClasses,
+      componentInventory,
+      notes: [
+        colors.length ? `${colors.length} color values found.` : "No explicit color values found in source.",
+        typography.length ? `${typography.length} typography signals found.` : "No typography signals found; generated design should document type decisions.",
+        componentInventory.length
+          ? `${componentInventory.length} anchored component regions found.`
+          : "No data-comment-anchor regions found; targeted chat edits will be weaker.",
+      ],
+    };
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: TOKEN_MANIFEST_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    setLatestTokenManifest(manifest);
+    pushLog("success", `Wrote token manifest: ${TOKEN_MANIFEST_PATH}`);
+    return manifest;
+  }
+
+  async function writeStaticCheckManifest(path: string) {
+    let artifact = "";
+    try {
+      artifact = await callTauri<string>("read_file", { workspacePath: path, relativePath: ARTIFACT_PATH });
+    } catch {
+      artifact = "";
+    }
+    const anchors = extractComponentInventory(artifact);
+    const anchorIds = anchors.map((item) => item.anchorId);
+    const duplicateAnchors = anchorIds.filter((id, index) => anchorIds.indexOf(id) !== index);
+    const checks: StaticCheckManifest["checks"] = [
+      {
+        id: "artifact-readable",
+        status: artifact ? "passed" : "failed",
+        message: artifact ? `${ARTIFACT_PATH} is readable.` : `${ARTIFACT_PATH} is missing or unreadable.`,
+      },
+      {
+        id: "default-export",
+        status: /export\s+default\s+function|export\s+default\s+[A-Z]/.test(artifact) ? "passed" : "failed",
+        message: /export\s+default\s+function|export\s+default\s+[A-Z]/.test(artifact)
+          ? "The generated screen has a default export."
+          : "The generated screen does not expose a recognizable default export.",
+      },
+      {
+        id: "screen-label",
+        status: /data-screen-label\s*=/.test(artifact) ? "passed" : "warning",
+        message: /data-screen-label\s*=/.test(artifact)
+          ? "A high-level data-screen-label is present."
+          : "No data-screen-label was found; comment context will be weaker.",
+      },
+      {
+        id: "comment-anchors",
+        status: anchors.length >= 3 ? "passed" : anchors.length ? "warning" : "failed",
+        message: anchors.length
+          ? `${anchors.length} data-comment-anchor regions found.`
+          : "No data-comment-anchor regions found.",
+      },
+      {
+        id: "duplicate-anchors",
+        status: duplicateAnchors.length ? "failed" : "passed",
+        message: duplicateAnchors.length
+          ? `Duplicate anchor ids: ${uniqueLimited(duplicateAnchors, 12).join(", ")}`
+          : "No duplicate data-comment-anchor ids found.",
+      },
+      {
+        id: "filler-copy",
+        status: /\blorem ipsum\b|\bTODO\b|dummy data|fake metric/i.test(artifact) ? "warning" : "passed",
+        message: /\blorem ipsum\b|\bTODO\b|dummy data|fake metric/i.test(artifact)
+          ? "Potential filler or fake-content markers were found."
+          : "No obvious lorem/TODO/fake metric markers found.",
+      },
+    ];
+    const status: StaticCheckManifest["status"] = checks.some((check) => check.status === "failed")
+      ? "failed"
+      : checks.some((check) => check.status === "warning")
+        ? "warning"
+        : "passed";
+    const manifest: StaticCheckManifest = {
+      status,
+      updatedAt: new Date().toISOString(),
+      artifactPath: ARTIFACT_PATH,
+      checks,
+    };
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: STATIC_CHECK_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    setLatestStaticCheck(manifest);
+    pushLog(status === "failed" ? "error" : "success", `Wrote static check: ${STATIC_CHECK_PATH} (${status})`);
+    return manifest;
+  }
+
   async function writePrompt(
     path: string,
     request: string,
@@ -1505,7 +1961,6 @@ export default function App() {
   async function writeClarificationPrompt(
     path: string,
     request: string,
-    mode: GenerationMode,
     context: DesignContextManifest,
     designSystemHealth: DesignSystemHealth,
     designSystemMarkdown: string,
@@ -1517,8 +1972,8 @@ export default function App() {
       contextPath: CONTEXT_PATH,
       clarificationPath: CLARIFICATION_PATH,
       contextSummary: formatContextForPrompt(context),
-      generationMode: mode,
-      mode,
+      generationMode: "guided",
+      mode: "guided",
       designSystemHealth,
       designSystemExcerpt: designSystemMarkdown.slice(0, 12000),
       recentFeedback: feedbackContext,
@@ -1777,6 +2232,8 @@ export default function App() {
     let clarification = "";
     let designBrief = "";
     let designContext = "";
+    let tokenManifest = "";
+    let staticCheck = "";
     let qualityAudit = "";
     try {
       designSystem = await callTauri<string>("read_file", { workspacePath: path, relativePath: "DESIGN.md" });
@@ -1797,6 +2254,16 @@ export default function App() {
       designContext = await callTauri<string>("read_file", { workspacePath: path, relativePath: CONTEXT_PATH });
     } catch {
       designContext = "";
+    }
+    try {
+      tokenManifest = await callTauri<string>("read_file", { workspacePath: path, relativePath: TOKEN_MANIFEST_PATH });
+    } catch {
+      tokenManifest = "";
+    }
+    try {
+      staticCheck = await callTauri<string>("read_file", { workspacePath: path, relativePath: STATIC_CHECK_PATH });
+    } catch {
+      staticCheck = "";
     }
     try {
       qualityAudit = await callTauri<string>("read_file", { workspacePath: path, relativePath: QUALITY_AUDIT_PATH });
@@ -1829,6 +2296,8 @@ High-fidelity frontend screen generated from this request. TypeScript/Vite verif
 
 - Design brief: ${designBrief ? BRIEF_PATH : "not-created"}
 - Context manifest: ${designContext ? CONTEXT_PATH : "not-created"}
+- Token manifest: ${tokenManifest ? TOKEN_MANIFEST_PATH : "not-created"}
+- Static source check: ${staticCheck ? STATIC_CHECK_PATH : "not-created"}
 - Clarification analysis: ${clarification ? CLARIFICATION_PATH : "not-created"}
 - Quality audit: ${qualityAudit ? QUALITY_AUDIT_PATH : "not-created"}
 
@@ -1837,6 +2306,10 @@ ${clarification ? `### Clarification\n\n\`\`\`json\n${clarification.trim()}\n\`\
 ${designBrief ? `### Brief\n\n\`\`\`json\n${designBrief.trim()}\n\`\`\`` : ""}
 
 ${designContext ? `### Context\n\n\`\`\`json\n${designContext.trim()}\n\`\`\`` : ""}
+
+${tokenManifest ? `### Tokens And Components\n\n\`\`\`json\n${tokenManifest.trim()}\n\`\`\`` : ""}
+
+${staticCheck ? `### Static Source Check\n\n\`\`\`json\n${staticCheck.trim()}\n\`\`\`` : ""}
 
 ${qualityAudit ? `### Quality Audit\n\n\`\`\`json\n${qualityAudit.trim()}\n\`\`\`` : ""}
 
@@ -1895,6 +2368,8 @@ ${designSystem.trim()}
 - ${CLARIFICATION_PROMPT_PATH}
 - ${BRIEF_PATH}
 - ${CONTEXT_PATH}
+- ${TOKEN_MANIFEST_PATH}
+- ${STATIC_CHECK_PATH}
 ${qualityAudit ? `- ${QUALITY_AUDIT_PATH}` : ""}
 ${qualityAudit ? `- ${QUALITY_PROMPT_PATH}` : ""}
 ${repairAttempts ? `- ${REPAIR_PROMPT_PATH}` : ""}
@@ -1993,6 +2468,9 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       setStep("artifact", "active");
       await refreshFiles(path);
       await writeAnchorManifest(path);
+      await writeTokenManifest(path);
+      await writeStaticCheckManifest(path);
+      await refreshFiles(path);
       setStep("artifact", "done");
       setManualVerifyResult(null);
       await appendChatMessage(path, "assistant", "수리 변경을 반영했습니다. 검증은 자동 재실행하지 않았습니다. 필요하면 검증 실행을 다시 누르세요.", "tool", "success");
@@ -2118,6 +2596,9 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         setManualCritique(critique);
         await refreshFiles(path);
         await writeAnchorManifest(path);
+        await writeTokenManifest(path);
+        await writeStaticCheckManifest(path);
+        await refreshFiles(path);
         setStep("critique", "done");
         await appendChatMessage(path, "assistant", "크리틱 패스를 적용했고 검증까지 통과했습니다.", "tool", "success");
       } catch (error) {
@@ -2213,6 +2694,9 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         await saveQualityAuditManifest(path, audit);
         await refreshFiles(path);
         await writeAnchorManifest(path);
+        await writeTokenManifest(path);
+        await writeStaticCheckManifest(path);
+        await refreshFiles(path);
         setStep("quality", audit.status === "failed" ? "error" : "done");
         await appendChatMessage(path, "assistant", `품질 검사가 완료됐습니다. status=${audit.status}.`, "tool", "success");
       } catch (error) {
@@ -2247,6 +2731,9 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       const path = await ensureActionWorkspace();
       await appendChatMessage(path, "assistant", "사용자 요청으로 핸드오프와 export 패키지를 생성합니다.", "tool", "info");
       const anchors = anchorManifest ?? (await loadAnchorManifest(path)) ?? (await writeAnchorManifest(path));
+      await writeTokenManifest(path);
+      await writeStaticCheckManifest(path);
+      await refreshFiles(path);
       const previewState = preview
         ? previewManifest("running", { url: preview.url, pid: preview.pid, statusCode: preview.statusCode })
         : null;
@@ -2289,10 +2776,11 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
-  async function startGuidedClarification(request: string, mode: GenerationMode) {
+  async function startGuidedClarification(request: string, attachments: AttachmentInfo[]) {
     setInput("");
     setChatPanelTab("conversation");
     setBusy(true);
+    const requestForCodex = requestWithAttachments(request, attachments);
     try {
       const path = await ensureWorkspace(request);
       await ensurePreviewSelectionBridge(path);
@@ -2301,21 +2789,21 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       await loadChatHistory(path);
       await loadActivityHistory(path);
       await loadAnchorManifest(path);
-      await appendChatMessage(path, "user", request);
+      await appendChatMessage(path, "user", request, "chat", undefined, attachments);
       await appendChatMessage(path, "assistant", "요청과 현재 디자인 시스템을 먼저 분석한 뒤 필요한 질문을 만들겠습니다.", "status", "info");
 
       const designSystemMarkdown = await readDesignSystem(path);
       const designSystemHealth = inspectDesignSystem(designSystemMarkdown);
       const context = await writeDesignContextManifest(path);
-      const prompt = await writeClarificationPrompt(path, request, mode, context, designSystemHealth, designSystemMarkdown);
+      const prompt = await writeClarificationPrompt(path, requestForCodex, context, designSystemHealth, designSystemMarkdown);
       await runCodexPrompt(path, prompt, "Codex design preflight");
 
       const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CLARIFICATION_PATH });
-      const clarification = normalizeClarificationManifest(JSON.parse(raw), request);
+      const clarification = normalizeClarificationManifest(JSON.parse(raw), requestForCodex);
       const nextClarification = {
         ...clarification,
-        mode,
-        request,
+        mode: "guided" as const,
+        request: requestForCodex,
         promptPath: CLARIFICATION_PROMPT_PATH,
         manifestPath: CLARIFICATION_PATH,
         updatedAt: new Date().toISOString(),
@@ -2329,7 +2817,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       await refreshFiles(path);
 
       if (nextClarification.shouldAskQuestions) {
-        setGuidedDraft({ request, mode, clarification: nextClarification, createdAt: new Date().toISOString() });
+        setGuidedDraft({ request, clarification: nextClarification, attachments, createdAt: new Date().toISOString() });
         await appendChatMessage(path, "assistant", buildClarificationChatMessage(nextClarification), "chat", "info");
         pushLog("info", `AI preflight produced ${nextClarification.questions.length} tailored questions.`);
         return nextClarification;
@@ -2350,8 +2838,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       const failed: DesignClarificationManifest = {
         status: "failed",
         updatedAt: new Date().toISOString(),
-        request,
-        mode,
+        request: requestForCodex,
+        mode: "guided",
         promptPath: CLARIFICATION_PROMPT_PATH,
         manifestPath: CLARIFICATION_PATH,
         shouldAskQuestions: false,
@@ -2373,7 +2861,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         error: message,
       };
       setLatestClarification(failed);
-      setGuidedDraft({ request, mode, clarification: failed, createdAt: new Date().toISOString() });
+      setGuidedDraft({ request, clarification: failed, attachments, createdAt: new Date().toISOString() });
       if (workspacePath) {
         await appendChatMessage(
           workspacePath,
@@ -2398,18 +2886,23 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
 
   async function runChat() {
     const request = input.trim();
-    if (!request || busy) return;
+    if ((!request && pendingAttachments.length === 0) || busy) return;
+    const attachments = pendingAttachments;
+    const effectiveRequest = request || "첨부파일을 바탕으로 디자인을 생성하세요.";
 
     if (!guidedDraft) {
-      const clarification = await startGuidedClarification(request, generationMode);
+      setPendingAttachments([]);
+      const clarification = await startGuidedClarification(effectiveRequest, attachments);
       if (clarification.status !== "failed" && !clarification.shouldAskQuestions) {
-        await runDesignRequest(request, { clarification });
+        await runDesignRequest(effectiveRequest, { clarification, attachments });
       }
       return;
     }
 
     if (guidedDraft) {
       const isFailedPreflight = guidedDraft.clarification.status === "failed";
+      const combinedAttachments = [...guidedDraft.attachments, ...attachments];
+      setPendingAttachments([]);
       const combinedRequest = isFailedPreflight
         ? `${guidedDraft.request}
 
@@ -2417,7 +2910,7 @@ DesignForge preflight failed:
 ${JSON.stringify(guidedDraft.clarification, null, 2)}
 
 User follow-up after preflight failure:
-${request}
+${effectiveRequest}
 
 Proceed from the original request. Infer missing context conservatively and record assumptions in DESIGN.md.`
         : `${guidedDraft.request}
@@ -2426,23 +2919,25 @@ DesignForge preflight analysis:
 ${JSON.stringify(guidedDraft.clarification, null, 2)}
 
 User answers to preflight questions:
-${request}`;
+${effectiveRequest}`;
       const recordRequest = `${guidedDraft.request}
 
 질문 답변:
-${request}`;
+${effectiveRequest}`;
       const clarification = guidedDraft.clarification;
       setGuidedDraft(null);
       await runDesignRequest(combinedRequest, {
-        displayRequest: request,
+        displayRequest: effectiveRequest,
         recordRequest,
         commentNote: recordRequest,
         clarification,
+        attachments: combinedAttachments,
       });
       return;
     }
 
-    await runDesignRequest(request);
+    setPendingAttachments([]);
+    await runDesignRequest(effectiveRequest, { attachments });
   }
 
   async function runDesignRequest(rawRequest: string, options: RunRequestOptions = {}) {
@@ -2462,6 +2957,8 @@ ${request}`;
     const displayRequest = options.displayRequest ?? request;
     const recordRequest = options.recordRequest ?? displayRequest;
     const commentNote = options.commentNote ?? displayRequest;
+    const attachments = options.attachments ?? [];
+    const requestForCodex = requestWithAttachments(request, attachments);
     const commentAnchorId = options.anchorId ?? anchorFromRequest(request);
     const commentScreenLabel = options.screenLabel ?? "Generated Screen";
 
@@ -2472,6 +2969,8 @@ ${request}`;
     let anchors: AnchorManifest | null = null;
     let brief: DesignBriefManifest | null = null;
     let context: DesignContextManifest | null = null;
+    let tokenManifest: DesignTokenManifest | null = null;
+    let staticCheck: StaticCheckManifest | null = null;
     const clarification = options.clarification ?? latestClarification;
 
     try {
@@ -2487,18 +2986,18 @@ ${request}`;
       if (clarification) setLatestClarification(clarification);
       else await loadDesignClarification(path);
       await loadQualityAudit(path);
-      await appendChatMessage(path, "user", displayRequest);
+      await appendChatMessage(path, "user", displayRequest, "chat", undefined, attachments);
       await appendChatMessage(path, "assistant", "워크스페이스와 이전 DesignForge 대화를 연결했습니다.", "status", "info");
       setStep("context", "done");
 
       setStep("design", "active");
       await appendChatMessage(path, "assistant", "DESIGN.md를 섹션별로 검사하고 부족한 품질 기준을 보강합니다.", "status", "info");
-      const designHealth = await prepareDesignSystem(path, request);
+      const designHealth = await prepareDesignSystem(path, requestForCodex);
       setStep("design", "done");
 
       setStep("brief", "active");
       context = await writeDesignContextManifest(path);
-      brief = await writeDesignBriefManifest(path, request, generationMode, designHealth, context, clarification);
+      brief = await writeDesignBriefManifest(path, requestForCodex, designHealth, context, clarification);
       setLatestContext(context);
       setLatestBrief(brief);
       await appendChatMessage(
@@ -2511,7 +3010,7 @@ ${request}`;
       setStep("brief", "done");
 
       setStep("prompt", "active");
-      const prompt = await writePrompt(path, request, brief, context, clarification);
+      const prompt = await writePrompt(path, requestForCodex, brief, context, clarification);
       await appendChatMessage(path, "assistant", `${PROMPT_PATH}에 Codex 전달 프롬프트를 준비했습니다.`, "tool", "success");
       setStep("prompt", "done");
 
@@ -2528,6 +3027,32 @@ ${request}`;
       setStep("artifact", "active");
       await refreshFiles(path);
       anchors = await writeAnchorManifest(path);
+      tokenManifest = await writeTokenManifest(path);
+      staticCheck = await writeStaticCheckManifest(path);
+      if (context) {
+        context = {
+          ...context,
+          updatedAt: new Date().toISOString(),
+          tokenManifestPath: TOKEN_MANIFEST_PATH,
+          staticCheckPath: STATIC_CHECK_PATH,
+          anchorCount: anchors.anchors.length,
+          notes: uniqueLimited(
+            [
+              ...context.notes.filter((note) => !note.includes(TOKEN_MANIFEST_PATH) && !note.includes(STATIC_CHECK_PATH)),
+              `${TOKEN_MANIFEST_PATH} records ${tokenManifest.colors.length} color values, ${tokenManifest.typography.length} typography signals, and ${tokenManifest.componentInventory.length} component anchors.`,
+              `${STATIC_CHECK_PATH} status is ${staticCheck.status}.`,
+            ],
+            24,
+          ),
+        };
+        await callTauri("write_file", {
+          workspacePath: path,
+          relativePath: CONTEXT_PATH,
+          content: JSON.stringify(context, null, 2),
+        });
+        setLatestContext(context);
+      }
+      await refreshFiles(path);
       setStep("artifact", "done");
 
       const runId = crypto.randomUUID();
@@ -2544,6 +3069,9 @@ ${request}`;
         briefPath: BRIEF_PATH,
         contextPath: CONTEXT_PATH,
         clarificationPath: clarification ? CLARIFICATION_PATH : undefined,
+        tokenManifestPath: tokenManifest ? TOKEN_MANIFEST_PATH : undefined,
+        staticCheckPath: staticCheck ? STATIC_CHECK_PATH : undefined,
+        staticCheckStatus: staticCheck?.status,
         codexExitCode: lastResult?.code ?? result.code,
         codexSessionId: (lastResult ?? result).sessionId ?? codexSession?.sessionId,
         codexUsedResume: (lastResult ?? result).usedResume,
@@ -2590,6 +3118,9 @@ ${request}`;
           briefPath: brief ? BRIEF_PATH : undefined,
           contextPath: context ? CONTEXT_PATH : undefined,
           clarificationPath: clarification ? CLARIFICATION_PATH : undefined,
+          tokenManifestPath: tokenManifest ? TOKEN_MANIFEST_PATH : undefined,
+          staticCheckPath: staticCheck ? STATIC_CHECK_PATH : undefined,
+          staticCheckStatus: staticCheck?.status,
           codexExitCode: lastResult?.code ?? null,
           codexSessionId: lastResult?.sessionId ?? codexSession?.sessionId,
           codexUsedResume: lastResult?.usedResume,
@@ -2620,6 +3151,90 @@ ${request}`;
     }
   }
 
+  async function runDirectSourceSplice(anchorId: string, screenLabel: string, note: string, replacement: { oldText: string; newText: string }) {
+    if (busy) return false;
+
+    setBusy(true);
+    setSteps(START_STEPS);
+    setManualVerifyResult(null);
+    setManualConsoleInfo(null);
+    setManualScreenshotInfo(null);
+    setManualCritique(null);
+    setManualQualityAudit(null);
+    setManualExportPath("");
+    const startedAt = new Date().toISOString();
+    let path = "";
+
+    try {
+      setStep("context", "active");
+      path = await ensureActionWorkspace();
+      setStep("context", "done");
+
+      setStep("artifact", "active");
+      const source = await callTauri<string>("read_file", { workspacePath: path, relativePath: ARTIFACT_PATH });
+      const applied = applyAnchoredTextReplacement(source, anchorId, replacement.oldText, replacement.newText);
+      if (!applied) {
+        setStep("artifact", "idle");
+        pushLog("info", "Direct source splice skipped because the requested text was not unique inside the selected anchor.");
+        return false;
+      }
+
+      await callTauri("write_file", {
+        workspacePath: path,
+        relativePath: ARTIFACT_PATH,
+        content: applied.nextSource,
+      });
+      await appendChatMessage(path, "user", `@${anchorId} ${note}`, "chat");
+      await refreshFiles(path);
+      const anchors = await writeAnchorManifest(path);
+      const tokenManifest = await writeTokenManifest(path);
+      const staticCheck = await writeStaticCheckManifest(path);
+      await refreshFiles(path);
+      setStep("artifact", "done");
+
+      const runId = crypto.randomUUID();
+      await recordRun(path, {
+        id: runId,
+        request: `@${anchorId} ${note}`,
+        status: "success",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        promptPath: "direct-source-splice",
+        artifactPath: ARTIFACT_PATH,
+        anchorManifestPath: ANCHORS_PATH,
+        anchorCount: anchors.anchors.length,
+        tokenManifestPath: TOKEN_MANIFEST_PATH,
+        staticCheckPath: STATIC_CHECK_PATH,
+        staticCheckStatus: staticCheck.status,
+        codexExitCode: null,
+        stdoutPreview: `Direct source splice at ${ARTIFACT_PATH}:${applied.line}. Tokens: ${tokenManifest.colors.length} colors.`,
+        stderrPreview: "",
+        repairAttempts: 0,
+      });
+      await appendComment(path, {
+        id: crypto.randomUUID(),
+        artifactPath: ARTIFACT_PATH,
+        screenLabel,
+        note,
+        source: "chat",
+        anchorId,
+        status: "applied",
+        createdAt: new Date().toISOString(),
+        runId,
+      });
+      await appendChatMessage(path, "assistant", `선택 영역의 문구를 직접 수정했습니다. ${ARTIFACT_PATH}:${applied.line}`, "tool", "success");
+      await loadRunHistory(path);
+      await refreshProjects();
+      return true;
+    } catch (error) {
+      pushLog("error", `Direct source splice failed: ${textFromError(error)}`);
+      if (path) await appendChatMessage(path, "assistant", `직접 수정은 실패해서 Codex 경로로 이어갑니다: ${textFromError(error)}`, "tool", "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runComponentEdit() {
     const note = componentEdit.trim();
     const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
@@ -2627,6 +3242,14 @@ ${request}`;
 
     const anchor = anchorManifest?.anchors.find((item) => item.id === anchorId);
     const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+    const directReplacement = parseDirectReplacement(note);
+    if (directReplacement) {
+      const applied = await runDirectSourceSplice(anchorId, screenLabel, note, directReplacement);
+      if (applied) {
+        setComponentEdit("");
+        return;
+      }
+    }
     const request = buildTargetedComponentRequest(anchorId, screenLabel, note, previewSelection);
     await runDesignRequest(request, {
       displayRequest: `@${anchorId} ${note}`,
@@ -2656,6 +3279,9 @@ ${request}`;
   const critiqueStatus = manualCritique?.status ?? latestRun?.critiqueStatus;
   const qualityStatus = manualQualityAudit?.status ?? latestRun?.qualityAuditStatus;
   const designHealth = latestBrief?.designSystemHealth;
+  const tokenSummary = latestTokenManifest
+    ? `${latestTokenManifest.colors.length} colors · ${latestTokenManifest.componentInventory.length} anchors`
+    : "pending";
   const visibleLogs = showAllLogs ? logs : logs.slice(-8);
   const conversationMessages = useMemo(
     () => messages.filter((message) => !isActivityMessage(message)),
@@ -2664,6 +3290,13 @@ ${request}`;
   const historyCount = activityMessages.length + runHistory.length;
   const activeProject = projects.find((project) => project.path === workspacePath);
   const activeProjectName = activeProject?.name || (workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : "프로젝트 없음");
+  const filteredProjects = useMemo(() => {
+    const query = projectSearch.trim().toLowerCase();
+    if (!query) return projects;
+    return projects.filter((project) =>
+      [project.name, project.path, project.lastMessage ?? ""].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [projects, projectSearch]);
   const verificationRows: Array<{ name: string; value: string; tone: "lime" | "cyan" | "amber" | "danger" | "steel" }> = [
     {
       name: "TypeScript/Vite",
@@ -2712,6 +3345,11 @@ ${request}`;
             : qualityStepStatus === "active"
               ? "cyan"
               : "steel",
+    },
+    {
+      name: "정적 소스 체크",
+      value: latestStaticCheck?.status ?? latestRun?.staticCheckStatus ?? "요청 대기",
+      tone: staticCheckTone(latestStaticCheck?.status ?? latestRun?.staticCheckStatus),
     },
   ];
 
@@ -2883,17 +3521,6 @@ ${request}`;
                   </div>
                 ) : null}
 
-                <label className="mb-2 inline-flex min-h-7 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-2.5 text-[11px] font-medium text-[var(--charcoal)]">
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3 accent-[var(--primary)]"
-                    checked={generationMode === "variations"}
-                    onChange={(event) => selectGenerationMode(event.target.checked ? "variations" : "guided")}
-                    disabled={busy || Boolean(guidedDraft)}
-                  />
-                  3안 비교 생성
-                </label>
-
                 <label className="sr-only" htmlFor="designforge-request">
                   DesignForge 요청
                 </label>
@@ -2912,23 +3539,72 @@ ${request}`;
                   }
                   disabled={busy}
                 />
-                <div data-comment-anchor="primary-action" className="mt-2 flex justify-end gap-2">
+                {pendingAttachments.length ? (
+                  <div className="mt-2 grid gap-1.5">
+                    {pendingAttachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="flex min-h-7 items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 text-[11px] text-[var(--charcoal)]"
+                      >
+                        <span className="min-w-0 truncate">
+                          {attachment.kind} · {attachment.name}
+                        </span>
+                        <button
+                          type="button"
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--muted)] transition hover:bg-white hover:text-[var(--ink)]"
+                          onClick={() => removePendingAttachment(attachment.id)}
+                          aria-label={`${attachment.name} 첨부 제거`}
+                          disabled={busy}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div data-comment-anchor="primary-action" className="mt-2 flex items-center justify-between gap-2">
+                  <div>
+                    <input
+                      id="designforge-attachments"
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        void addPendingFiles(event.currentTarget.files);
+                        event.currentTarget.value = "";
+                      }}
+                      disabled={busy}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="min-h-7 px-3 text-[11px]"
+                      onClick={() => document.getElementById("designforge-attachments")?.click()}
+                      disabled={busy}
+                    >
+                      <Paperclip size={12} />
+                      파일
+                    </Button>
+                  </div>
+                  <div className="flex justify-end gap-2">
                   <Button
                     variant="secondary"
                     className="min-h-7 px-3 text-[11px]"
                     onClick={() => {
                       setInput("");
                       setGuidedDraft(null);
+                      setPendingAttachments([]);
                     }}
-                    disabled={busy || (!input && !guidedDraft)}
+                    disabled={busy || (!input && !guidedDraft && pendingAttachments.length === 0)}
                     aria-label="입력 비우기"
                   >
                     비우기
                   </Button>
-                  <Button variant="primary" onClick={runChat} disabled={busy || !input.trim()} className="min-h-7 px-3 text-[11px]">
+                  <Button variant="primary" onClick={runChat} disabled={busy || (!input.trim() && pendingAttachments.length === 0)} className="min-h-7 px-3 text-[11px]">
                     {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                     {guidedDraft ? "답변 보내기" : "보내기"}
                   </Button>
+                  </div>
                 </div>
               </div>
             </>
@@ -3170,10 +3846,32 @@ ${request}`;
               <p className="truncate font-mono">{projectRootPath}</p>
             </div>
 
-            <Button className="mt-4 w-full" variant="primary" onClick={() => void createNewProject()} disabled={busy}>
-              <Plus size={16} />
-              새 프로젝트 만들기
-            </Button>
+            <div className="mt-4 grid gap-2">
+              <label className="sr-only" htmlFor="new-project-name">
+                새 프로젝트 이름
+              </label>
+              <input
+                id="new-project-name"
+                value={newProjectName}
+                onChange={(event) => setNewProjectName(event.target.value)}
+                className="min-h-10 w-full rounded-xl border border-[var(--line-strong)] bg-white px-3 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+                placeholder="프로젝트 이름"
+                disabled={busy}
+              />
+              <Button
+                className="w-full"
+                variant="primary"
+                onClick={() => {
+                  const name = newProjectName.trim();
+                  setNewProjectName("");
+                  void createNewProject(name || undefined);
+                }}
+                disabled={busy}
+              >
+                <Plus size={16} />
+                새 프로젝트 만들기
+              </Button>
+            </div>
 
             <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
               <h3 className="text-sm font-semibold text-[var(--ink-strong)]">프로젝트 목록</h3>
@@ -3182,13 +3880,30 @@ ${request}`;
               </Button>
             </div>
 
+            <label className="mt-3 flex min-h-10 items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 text-xs text-[var(--muted)]" htmlFor="project-search">
+              <Search size={14} className="shrink-0" />
+              <input
+                id="project-search"
+                value={projectSearch}
+                onChange={(event) => setProjectSearch(event.target.value)}
+                className="min-w-0 flex-1 bg-transparent text-sm text-[var(--ink)] outline-none placeholder:text-[var(--muted)]"
+                placeholder="프로젝트 검색"
+              />
+              <span className="shrink-0 font-mono">{filteredProjects.length}/{projects.length}</span>
+            </label>
+
             <div className="mt-3 grid gap-2">
               {projects.length === 0 ? (
                 <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
                   아직 생성된 프로젝트가 없습니다. 새 프로젝트를 만들면 독립된 채팅, 작업 기록, DESIGN.md, 생성 결과물을 갖는 디렉토리가 생성됩니다.
                 </div>
               ) : null}
-              {projects.map((project) => {
+              {projects.length > 0 && filteredProjects.length === 0 ? (
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
+                  검색 결과가 없습니다.
+                </div>
+              ) : null}
+              {filteredProjects.map((project) => {
                 const active = project.path === workspacePath;
                 return (
                   <button
@@ -3349,13 +4064,14 @@ ${request}`;
             <h2 className="mt-2 text-xl font-bold tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
           </div>
           {[
-            ["Brief", latestBrief?.mode ?? generationMode, designHealth ? `${designHealth.score}/100` : "pending"],
+            ["Brief", latestBrief?.mode ?? "guided", designHealth ? `${designHealth.score}/100` : "pending"],
             [
               "Clarify",
               latestClarification ? `${latestClarification.confidence}/100` : "pending",
               latestClarification?.shouldAskQuestions ? `${latestClarification.questions.length} qs` : latestClarification ? "skipped" : "AI",
             ],
             ["Context", latestContext ? `${latestContext.assetFiles.length} assets` : "pending", latestContext ? `${latestContext.sourceFiles.length} src` : "ready"],
+            ["Tokens", tokenSummary, latestTokenManifest ? `${latestTokenManifest.typography.length} type` : "pending"],
             ["System", designHealth?.status ?? "not scored", designHealth?.missingSections.length ? `${designHealth.missingSections.length} gaps` : "stable"],
             ["Artifact", ARTIFACT_PATH, preview ? "live" : "ready"],
           ].map(([name, value, note]) => (
@@ -3605,6 +4321,24 @@ function ChatRow({ message }: { message: ChatMessage }) {
           </span>
         </div>
         <p className="whitespace-pre-wrap break-words text-[12px] leading-5 [overflow-wrap:anywhere]">{message.content}</p>
+        {message.attachments?.length ? (
+          <div className="mt-2 grid gap-1">
+            {message.attachments.map((attachment) => (
+              <div
+                key={attachment.id}
+                className={cn(
+                  "flex min-h-6 items-center justify-between gap-2 rounded-md border px-2 py-1 text-[10px]",
+                  isUser ? "border-white/20 bg-white/10 text-white/80" : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--muted)]",
+                )}
+              >
+                <span className="min-w-0 truncate">
+                  {attachment.kind} · {attachment.name}
+                </span>
+                <span className="shrink-0 font-mono">{Math.max(1, Math.round(attachment.size / 1024))}KB</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
