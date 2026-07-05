@@ -5,6 +5,7 @@ import {
   FileText,
   FolderOpen,
   History,
+  Image as ImageIcon,
   Loader2,
   Maximize2,
   MessageCircle,
@@ -27,6 +28,7 @@ import {
   buildCritiquePrompt,
   buildDesignClarificationPrompt,
   buildDesignSystemSeed,
+  buildImageGenerationPrompt,
   buildQualityAuditPrompt,
   buildRepairPrompt,
   buildStructuredPrompt,
@@ -91,6 +93,7 @@ const CLARIFICATION_PATH = ".designforge/clarification.json";
 const QUALITY_AUDIT_PATH = ".designforge/quality-audit.json";
 const PROMPT_PATH = "prompts/latest.md";
 const CLARIFICATION_PROMPT_PATH = "prompts/clarification-latest.md";
+const IMAGE_PROMPT_PATH = "prompts/image-latest.md";
 const REPAIR_PROMPT_PATH = "prompts/repair-latest.md";
 const CRITIQUE_PROMPT_PATH = "prompts/critique-latest.md";
 const QUALITY_PROMPT_PATH = "prompts/quality-latest.md";
@@ -102,6 +105,8 @@ const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
 const COMMENTS_PATH = ".designforge/comments.jsonl";
 const ATTACHMENTS_MANIFEST_PATH = ".designforge/attachments.json";
 const ATTACHMENTS_DIR = ".designforge/attachments";
+const GENERATED_IMAGES_PATH = ".designforge/generated-images.json";
+const GENERATED_IMAGES_DIR = "assets/generated";
 const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
 const CONSOLE_PATH = "outputs/console/latest.json";
 const ARTIFACT_VIEWPORT_WIDTH = 1920;
@@ -137,8 +142,12 @@ type PreviewSelection = {
   anchorId: string;
   screenLabel: string;
   tagName: string;
+  anchorTagName?: string;
   text: string;
+  anchorText?: string;
+  className?: string;
   path: string[];
+  anchorPath?: string[];
 };
 
 type GuidedDraft = {
@@ -613,6 +622,20 @@ function inferPurposeAssumption(request: string) {
   return "Create a focused, high-craft frontend screen that can be iterated through chat.";
 }
 
+function isImageGenerationRequest(request: string) {
+  return /\$imagegen|이미지\s*(생성|만들|그려|제작)|그림\s*(생성|만들|그려|제작)|generate\s+(an?\s+)?image|create\s+(an?\s+)?image/i.test(request);
+}
+
+function isSmallRevisionRequest(request: string, hasTarget: boolean, hasAttachments: boolean) {
+  if (hasAttachments || isImageGenerationRequest(request)) return false;
+  if (request.length > 360) return false;
+  const asksForNewWork = /(새로|처음부터|new\s+screen|fresh|reset|replace\s+the\s+whole|리디자인|전체\s*교체|랜딩|페이지\s*만들|앱\s*만들|사이트\s*만들)/i.test(request);
+  if (asksForNewWork) return false;
+  const editSignal =
+    /(@[a-z][a-z0-9-]{1,63}|줄바꿈|줄\s*바꿈|개행|위치|정렬|간격|여백|크기|폰트|글자|색|컬러|문구|텍스트|버튼|작게|크게|왼쪽|오른쪽|위로|아래로|수정|변경|바꿔|고쳐|edit|fix|adjust|move|resize|align|spacing|padding|margin|color|text)/i.test(request);
+  return editSignal && (hasTarget || request.length <= 160);
+}
+
 function qualityBar() {
   return [
     "The request is translated into explicit artifact type, audience, fidelity, constraints, and success criteria.",
@@ -765,7 +788,22 @@ function lineStartOffsets(source: string) {
   return offsets;
 }
 
-function applyAnchoredTextReplacement(source: string, anchorId: string, oldText: string, newText: string) {
+type AnchorSourceRegion = {
+  startOffset: number;
+  endOffset: number;
+  region: string;
+};
+
+type DirectSourcePatch = {
+  nextSource: string;
+  line: number;
+  summary: string;
+};
+
+const TEXT_SIZE_CLASSES = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl", "text-2xl", "text-3xl", "text-4xl", "text-5xl", "text-6xl"];
+const SPACING_SCALE = ["0", "0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "5", "6", "8", "10", "12", "16"];
+
+function findAnchorRegion(source: string, anchorId: string): AnchorSourceRegion | null {
   const match = source.match(new RegExp(`data-comment-anchor\\s*=\\s*["']${escapeRegex(anchorId)}["']`));
   if (match?.index === undefined) return null;
 
@@ -776,6 +814,37 @@ function applyAnchoredTextReplacement(source: string, anchorId: string, oldText:
   const startOffset = offsets[startLine] ?? 0;
   const endOffset = offsets[endLine] ?? source.length;
   const region = source.slice(startOffset, endOffset);
+  return { startOffset, endOffset, region };
+}
+
+function findUniqueTextInRegion(region: string, text: string) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return null;
+  if (countOccurrences(region, clean) === 1) {
+    const index = region.indexOf(clean);
+    return { index, length: clean.length, text: clean };
+  }
+
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const pattern = new RegExp(parts.map(escapeRegex).join("\\s+"), "m");
+  const matches = Array.from(region.matchAll(new RegExp(pattern.source, "gm")));
+  if (matches.length !== 1 || matches[0].index === undefined) return null;
+  return { index: matches[0].index, length: matches[0][0].length, text: matches[0][0] };
+}
+
+function jsxTextWithBreaks(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+    .join("<br />");
+}
+
+function applyAnchoredTextReplacement(source: string, anchorId: string, oldText: string, newText: string): DirectSourcePatch | null {
+  const anchorRegion = findAnchorRegion(source, anchorId);
+  if (!anchorRegion) return null;
+  const { startOffset, region } = anchorRegion;
   if (countOccurrences(region, oldText) !== 1) return null;
 
   const relativeIndex = region.indexOf(oldText);
@@ -783,7 +852,111 @@ function applyAnchoredTextReplacement(source: string, anchorId: string, oldText:
   return {
     nextSource: `${source.slice(0, absoluteIndex)}${newText}${source.slice(absoluteIndex + oldText.length)}`,
     line: lineNumberAt(source, absoluteIndex),
+    summary: `Text replacement at ${ARTIFACT_PATH}:${lineNumberAt(source, absoluteIndex)}.`,
   };
+}
+
+function applyAnchoredLineBreakEdit(source: string, anchorId: string, selectedText: string, nextText: string): DirectSourcePatch | null {
+  const anchorRegion = findAnchorRegion(source, anchorId);
+  if (!anchorRegion) return null;
+  const match = findUniqueTextInRegion(anchorRegion.region, selectedText);
+  if (!match) return null;
+
+  const absoluteIndex = anchorRegion.startOffset + match.index;
+  const replacement = nextText.includes("\n") ? jsxTextWithBreaks(nextText) : nextText.trim();
+  return {
+    nextSource: `${source.slice(0, absoluteIndex)}${replacement}${source.slice(absoluteIndex + match.length)}`,
+    line: lineNumberAt(source, absoluteIndex),
+    summary: `Direct text edit at ${ARTIFACT_PATH}:${lineNumberAt(source, absoluteIndex)}.`,
+  };
+}
+
+function classTokenIndex(tokens: string[], allowed: string[]) {
+  return tokens.findIndex((token) => allowed.includes(token));
+}
+
+function shiftBy<T>(values: T[], currentIndex: number, delta: number) {
+  return Math.max(0, Math.min(values.length - 1, currentIndex + delta));
+}
+
+function adjustTextSizeClasses(className: string, delta: number) {
+  const tokens = className.split(/\s+/).filter(Boolean);
+  const index = classTokenIndex(tokens, TEXT_SIZE_CLASSES);
+  const currentIndex = index >= 0 ? TEXT_SIZE_CLASSES.indexOf(tokens[index]) : TEXT_SIZE_CLASSES.indexOf("text-base");
+  const nextClass = TEXT_SIZE_CLASSES[shiftBy(TEXT_SIZE_CLASSES, currentIndex, delta)];
+  if (index >= 0) tokens[index] = nextClass;
+  else tokens.push(nextClass);
+  return uniqueLimited(tokens, 120).join(" ");
+}
+
+function shiftSpacingToken(token: string, delta: number) {
+  const match = token.match(/^(p[trblxy]?)-(.+)$/);
+  if (!match) return token;
+  const current = SPACING_SCALE.indexOf(match[2]);
+  if (current < 0) return token;
+  return `${match[1]}-${SPACING_SCALE[shiftBy(SPACING_SCALE, current, delta)]}`;
+}
+
+function adjustElementSpaceClasses(className: string, delta: number) {
+  const tokens = className.split(/\s+/).filter(Boolean);
+  const indexes = tokens.map((token, index) => (/^p[trblxy]?-[\w.]+$/.test(token) ? index : -1)).filter((index) => index >= 0);
+  if (!indexes.length) {
+    tokens.push(delta > 0 ? "px-4" : "px-2", delta > 0 ? "py-3" : "py-1.5");
+  } else {
+    indexes.forEach((index) => {
+      tokens[index] = shiftSpacingToken(tokens[index], delta);
+    });
+  }
+  return uniqueLimited(tokens, 120).join(" ");
+}
+
+function nearestOpeningTagStart(source: string, textIndex: number) {
+  let index = textIndex;
+  while (index >= 0) {
+    const start = source.lastIndexOf("<", index);
+    if (start < 0) return -1;
+    const end = source.indexOf(">", start);
+    if (end >= textIndex) {
+      index = start - 1;
+      continue;
+    }
+    const nextClose = source.indexOf("</", end);
+    if (nextClose >= textIndex || nextClose === -1) return start;
+    index = start - 1;
+  }
+  return -1;
+}
+
+function replaceOpeningTagClass(source: string, openingStart: number, adjust: (className: string) => string): DirectSourcePatch | null {
+  const openingEnd = source.indexOf(">", openingStart);
+  if (openingEnd < 0) return null;
+  const opening = source.slice(openingStart, openingEnd + 1);
+  const stringClass = opening.match(/\sclassName=(["'`])([^"'`]*?)\1/);
+  if (!stringClass && /\sclassName=/.test(opening)) return null;
+  const nextOpening = stringClass
+    ? `${opening.slice(0, stringClass.index)} className=${stringClass[1]}${adjust(stringClass[2])}${stringClass[1]}${opening.slice((stringClass.index ?? 0) + stringClass[0].length)}`
+    : `${opening.slice(0, -1)} className="${adjust("")}">`;
+  return {
+    nextSource: `${source.slice(0, openingStart)}${nextOpening}${source.slice(openingEnd + 1)}`,
+    line: lineNumberAt(source, openingStart),
+    summary: `Class adjustment at ${ARTIFACT_PATH}:${lineNumberAt(source, openingStart)}.`,
+  };
+}
+
+function applyAnchoredClassAdjustment(
+  source: string,
+  anchorId: string,
+  selection: PreviewSelection | null,
+  adjust: (className: string) => string,
+): DirectSourcePatch | null {
+  const anchorRegion = findAnchorRegion(source, anchorId);
+  if (!anchorRegion) return null;
+  const match = selection?.text ? findUniqueTextInRegion(anchorRegion.region, selection.text) : null;
+  const relativeTarget = match?.index ?? anchorRegion.region.indexOf(`data-comment-anchor=`);
+  if (relativeTarget < 0) return null;
+  const openingStart = nearestOpeningTagStart(source, anchorRegion.startOffset + relativeTarget);
+  if (openingStart < anchorRegion.startOffset || openingStart > anchorRegion.endOffset) return null;
+  return replaceOpeningTagClass(source, openingStart, adjust);
 }
 
 function normalizeQuestionKind(value: unknown): DesignClarificationManifest["questions"][number]["kind"] {
@@ -897,6 +1070,7 @@ export default function App() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [artifactOnlyMode, setArtifactOnlyMode] = useState(false);
   const [componentEdit, setComponentEdit] = useState("");
+  const [selectedTextDraft, setSelectedTextDraft] = useState("");
   const [manualVerifyResult, setManualVerifyResult] = useState<CommandResult | null>(null);
   const [manualConsoleInfo, setManualConsoleInfo] = useState<ConsoleInfo | null>(null);
   const [manualScreenshotInfo, setManualScreenshotInfo] = useState<ScreenshotInfo | null>(null);
@@ -936,6 +1110,7 @@ export default function App() {
             QUALITY_AUDIT_PATH,
             CLARIFICATION_PROMPT_PATH,
             PROMPT_PATH,
+            IMAGE_PROMPT_PATH,
             REPAIR_PROMPT_PATH,
             CRITIQUE_PROMPT_PATH,
             QUALITY_PROMPT_PATH,
@@ -947,10 +1122,12 @@ export default function App() {
             CONSOLE_PATH,
             PREVIEW_MANIFEST_PATH,
             COMMENTS_PATH,
+            GENERATED_IMAGES_PATH,
             ARTIFACT_PATH,
             "designforge.config.json",
           ].includes(file.relativePath) ||
           file.relativePath === "CODEX_DESIGN.md" ||
+          file.relativePath.startsWith(`${GENERATED_IMAGES_DIR}/`) ||
           file.relativePath === "src/styles.css",
         ),
     [files],
@@ -963,11 +1140,16 @@ export default function App() {
         anchorId: event.data.anchorId,
         screenLabel: event.data.screenLabel || "Generated Screen",
         tagName: event.data.tagName || "element",
+        anchorTagName: event.data.anchorTagName,
         text: event.data.text || "",
+        anchorText: event.data.anchorText,
+        className: event.data.className,
         path: Array.isArray(event.data.path) ? event.data.path.filter((item) => typeof item === "string") : [],
+        anchorPath: Array.isArray(event.data.anchorPath) ? event.data.anchorPath.filter((item) => typeof item === "string") : [],
       };
       setSelectedAnchorId(selection.anchorId);
       setPreviewSelection(selection);
+      setSelectedTextDraft(selection.text);
     }
 
     window.addEventListener("message", handlePreviewMessage);
@@ -1547,7 +1729,24 @@ export default function App() {
   async function ensurePreviewSelectionBridge(path: string) {
     try {
       const current = await callTauri<string>("read_file", { workspacePath: path, relativePath: "src/App.tsx" });
-      if (current.includes("DesignForgeSelectionBridge")) return;
+      if (current.includes("DesignForgeSelectionBridge")) {
+        if (current.includes("function targetElement") && current.includes("anchorText")) return;
+        const isBridgeWrapper =
+          current.includes('import Screen from "./generated/Screen"') &&
+          current.includes("<DesignForgeSelectionBridge />") &&
+          current.includes("<Screen />");
+        if (!isBridgeWrapper) {
+          pushLog("info", "Workspace src/App.tsx has a custom selection bridge; leaving it unchanged.");
+          return;
+        }
+        await callTauri("write_file", {
+          workspacePath: path,
+          relativePath: "src/App.tsx",
+          content: WORKSPACE_SELECTION_APP_TSX,
+        });
+        pushLog("success", "Upgraded preview click selection bridge.");
+        return;
+      }
 
       const isDefaultWrapper =
         current.includes('import Screen from "./generated/Screen"') &&
@@ -2010,6 +2209,21 @@ export default function App() {
       content: prompt,
     });
     pushLog("success", `Compiled ${PROMPT_PATH}.`);
+    return prompt;
+  }
+
+  async function writeImageGenerationPrompt(path: string, request: string, context: DesignContextManifest) {
+    const prompt = buildImageGenerationPrompt(request, {
+      contextPath: CONTEXT_PATH,
+      designSystemPath: "DESIGN.md",
+      contextSummary: formatContextForPrompt(context),
+    });
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: IMAGE_PROMPT_PATH,
+      content: prompt,
+    });
+    pushLog("success", `Compiled ${IMAGE_PROMPT_PATH}.`);
     return prompt;
   }
 
@@ -2831,6 +3045,146 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
+  async function listGeneratedImageFiles(path: string) {
+    const workspaceFiles = await callTauri<WorkspaceFile[]>("list_workspace_files", { workspacePath: path });
+    return workspaceFiles
+      .filter((file) => !file.isDirectory && file.relativePath.startsWith(`${GENERATED_IMAGES_DIR}/`) && /\.(png|jpe?g|webp|gif|avif)$/i.test(file.relativePath))
+      .map((file) => file.relativePath)
+      .sort();
+  }
+
+  async function runImageGenerationRequest(rawRequest: string, options: Pick<RunRequestOptions, "attachments" | "displayRequest" | "recordRequest"> = {}) {
+    const request = rawRequest.trim();
+    if (!request || busy) return;
+
+    setInput("");
+    setChatPanelTab("conversation");
+    setBusy(true);
+    setSteps(START_STEPS);
+    setManualVerifyResult(null);
+    setManualConsoleInfo(null);
+    setManualScreenshotInfo(null);
+    setManualCritique(null);
+    setManualQualityAudit(null);
+    setManualExportPath("");
+    const attachments = options.attachments ?? [];
+    const requestForCodex = requestWithAttachments(request, attachments);
+    const displayRequest = options.displayRequest ?? request;
+    const recordRequest = options.recordRequest ?? displayRequest;
+    const startedAt = new Date().toISOString();
+    let path = "";
+    let lastResult: CommandResult | null = null;
+
+    try {
+      setStep("context", "active");
+      path = await ensureWorkspace(recordRequest);
+      await ensurePreviewSelectionBridge(path);
+      await refreshFiles(path);
+      await loadRunHistory(path);
+      await loadCodexSession(path);
+      await loadChatHistory(path);
+      await loadActivityHistory(path);
+      await appendChatMessage(path, "user", displayRequest, "chat", undefined, attachments);
+      await appendChatMessage(path, "assistant", "Codex 이미지 생성 기능으로 에셋을 만들겠습니다.", "status", "info");
+      const context = await writeDesignContextManifest(path);
+      setLatestContext(context);
+      setStep("context", "done");
+
+      setStep("prompt", "active");
+      const prompt = await writeImageGenerationPrompt(path, requestForCodex, context);
+      await appendChatMessage(path, "assistant", `${IMAGE_PROMPT_PATH}에 이미지 생성 프롬프트를 준비했습니다.`, "tool", "success");
+      setStep("prompt", "done");
+
+      setStep("codex", "active");
+      const check = await callTauri<CommandResult>("check_codex", { codexPath: settings.codexPath });
+      pushCommandResult("Codex check", check);
+      if (!check.success) throw new Error("Codex CLI is not available.");
+      lastResult = await runCodexPrompt(path, prompt, "Codex image generation");
+      setStep("codex", "done");
+
+      setStep("artifact", "active");
+      await refreshFiles(path);
+      const imageFiles = await listGeneratedImageFiles(path);
+      await callTauri("write_file", {
+        workspacePath: path,
+        relativePath: GENERATED_IMAGES_PATH,
+        content: JSON.stringify(
+          {
+            updatedAt: new Date().toISOString(),
+            request: recordRequest,
+            promptPath: IMAGE_PROMPT_PATH,
+            imageFiles,
+            sourcePrompt: requestForCodex,
+            notes: imageFiles.length
+              ? [`${imageFiles.length} generated image file(s) found in ${GENERATED_IMAGES_DIR}.`]
+              : [`No generated image files were detected under ${GENERATED_IMAGES_DIR}. Check Codex output for details.`],
+          },
+          null,
+          2,
+        ),
+      });
+      await refreshFiles(path);
+      setStep("artifact", "done");
+
+      const runId = crypto.randomUUID();
+      await recordRun(path, {
+        id: runId,
+        request: recordRequest,
+        status: "success",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        promptPath: IMAGE_PROMPT_PATH,
+        artifactPath: GENERATED_IMAGES_DIR,
+        contextPath: CONTEXT_PATH,
+        codexExitCode: lastResult.code,
+        codexSessionId: lastResult.sessionId ?? codexSession?.sessionId,
+        codexUsedResume: lastResult.usedResume,
+        stdoutPreview: lastResult.stdout.trim().slice(0, 1000),
+        stderrPreview: lastResult.stderr.trim().slice(0, 1000),
+        repairAttempts: 0,
+      });
+      await appendChatMessage(
+        path,
+        "assistant",
+        imageFiles.length
+          ? `이미지 생성이 완료됐습니다. ${imageFiles.map((file) => `\`${file}\``).join(", ")}`
+          : `이미지 생성 턴은 완료됐지만 ${GENERATED_IMAGES_DIR}에서 결과 파일을 찾지 못했습니다. Codex 출력과 ${GENERATED_IMAGES_PATH}를 확인하세요.`,
+        "summary",
+        imageFiles.length ? "success" : "info",
+      );
+      await refreshProjects();
+    } catch (error) {
+      const message = textFromError(error);
+      setSteps((current) => current.map((step) => (step.status === "active" ? { ...step, status: "error" } : step)));
+      pushLog("error", message);
+      if (path) {
+        const runId = crypto.randomUUID();
+        await recordRun(path, {
+          id: runId,
+          request: recordRequest,
+          status: "error",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          promptPath: IMAGE_PROMPT_PATH,
+          artifactPath: GENERATED_IMAGES_DIR,
+          contextPath: CONTEXT_PATH,
+          codexExitCode: lastResult?.code ?? null,
+          codexSessionId: lastResult?.sessionId ?? codexSession?.sessionId,
+          codexUsedResume: lastResult?.usedResume,
+          stdoutPreview: lastResult?.stdout.trim().slice(0, 1000) ?? "",
+          stderrPreview: lastResult?.stderr.trim().slice(0, 1000) ?? "",
+          repairAttempts: 0,
+          error: message,
+        });
+        await appendChatMessage(path, "assistant", `이미지 생성이 중단됐습니다: ${message}`, "summary", "error");
+      } else {
+        pushMessage("assistant", `이미지 생성이 중단됐습니다: ${message}`, "summary", "error");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startGuidedClarification(request: string, attachments: AttachmentInfo[]) {
     setInput("");
     setChatPanelTab("conversation");
@@ -2944,9 +3298,45 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     if ((!request && pendingAttachments.length === 0) || busy) return;
     const attachments = pendingAttachments;
     const effectiveRequest = request || "첨부파일을 바탕으로 디자인을 생성하세요.";
+    const targetedAnchorId = anchorFromRequest(effectiveRequest) || selectedAnchorId || previewSelection?.anchorId || "";
 
     if (!guidedDraft) {
       setPendingAttachments([]);
+      if (isImageGenerationRequest(effectiveRequest)) {
+        await runImageGenerationRequest(effectiveRequest, { attachments });
+        return;
+      }
+
+      if (targetedAnchorId) {
+        const directReplacement = parseDirectReplacement(effectiveRequest);
+        if (directReplacement) {
+          const anchor = anchorManifest?.anchors.find((item) => item.id === targetedAnchorId);
+          const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+          const applied = await runDirectSourceSplice(targetedAnchorId, screenLabel, effectiveRequest, directReplacement);
+          if (applied) {
+            setInput("");
+            return;
+          }
+        }
+      }
+
+      if (isSmallRevisionRequest(effectiveRequest, Boolean(targetedAnchorId), attachments.length > 0)) {
+        const anchor = targetedAnchorId ? anchorManifest?.anchors.find((item) => item.id === targetedAnchorId) : undefined;
+        const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+        const targetRequest =
+          targetedAnchorId && !anchorFromRequest(effectiveRequest)
+            ? buildTargetedComponentRequest(targetedAnchorId, screenLabel, effectiveRequest, previewSelection)
+            : effectiveRequest;
+        await runDesignRequest(targetRequest, {
+          displayRequest: effectiveRequest,
+          commentNote: effectiveRequest,
+          anchorId: targetedAnchorId || undefined,
+          screenLabel,
+          attachments,
+        });
+        return;
+      }
+
       const clarification = await startGuidedClarification(effectiveRequest, attachments);
       if (clarification.status !== "failed" && !clarification.shouldAskQuestions) {
         await runDesignRequest(effectiveRequest, { clarification, attachments });
@@ -3206,7 +3596,14 @@ ${effectiveRequest}`;
     }
   }
 
-  async function runDirectSourceSplice(anchorId: string, screenLabel: string, note: string, replacement: { oldText: string; newText: string }) {
+  async function runDirectArtifactPatch(
+    anchorId: string,
+    screenLabel: string,
+    note: string,
+    promptLabel: string,
+    successMessage: (patch: DirectSourcePatch) => string,
+    applyPatchToSource: (source: string) => DirectSourcePatch | null,
+  ) {
     if (busy) return false;
 
     setBusy(true);
@@ -3227,10 +3624,17 @@ ${effectiveRequest}`;
 
       setStep("artifact", "active");
       const source = await callTauri<string>("read_file", { workspacePath: path, relativePath: ARTIFACT_PATH });
-      const applied = applyAnchoredTextReplacement(source, anchorId, replacement.oldText, replacement.newText);
+      const applied = applyPatchToSource(source);
       if (!applied) {
         setStep("artifact", "idle");
-        pushLog("info", "Direct source splice skipped because the requested text was not unique inside the selected anchor.");
+        pushLog("info", `${promptLabel} skipped because the selected source location was not unique enough.`);
+        await appendChatMessage(
+          path,
+          "assistant",
+          "직접 수정 위치가 명확하지 않아 자동 적용하지 않았습니다. 아래 '선택 영역 수정 내용'으로 보내면 Codex가 좁게 수정합니다.",
+          "tool",
+          "info",
+        );
         return false;
       }
 
@@ -3254,7 +3658,7 @@ ${effectiveRequest}`;
         status: "success",
         startedAt,
         finishedAt: new Date().toISOString(),
-        promptPath: "direct-source-splice",
+        promptPath: promptLabel,
         artifactPath: ARTIFACT_PATH,
         anchorManifestPath: ANCHORS_PATH,
         anchorCount: anchors.anchors.length,
@@ -3262,7 +3666,7 @@ ${effectiveRequest}`;
         staticCheckPath: STATIC_CHECK_PATH,
         staticCheckStatus: staticCheck.status,
         codexExitCode: null,
-        stdoutPreview: `Direct source splice at ${ARTIFACT_PATH}:${applied.line}. Tokens: ${tokenManifest.colors.length} colors.`,
+        stdoutPreview: `${applied.summary} Tokens: ${tokenManifest.colors.length} colors.`,
         stderrPreview: "",
         repairAttempts: 0,
       });
@@ -3277,17 +3681,64 @@ ${effectiveRequest}`;
         createdAt: new Date().toISOString(),
         runId,
       });
-      await appendChatMessage(path, "assistant", `선택 영역의 문구를 직접 수정했습니다. ${ARTIFACT_PATH}:${applied.line}`, "tool", "success");
+      await appendChatMessage(path, "assistant", successMessage(applied), "tool", "success");
       await loadRunHistory(path);
       await refreshProjects();
       return true;
     } catch (error) {
-      pushLog("error", `Direct source splice failed: ${textFromError(error)}`);
+      pushLog("error", `${promptLabel} failed: ${textFromError(error)}`);
       if (path) await appendChatMessage(path, "assistant", `직접 수정은 실패해서 Codex 경로로 이어갑니다: ${textFromError(error)}`, "tool", "error");
       return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runDirectSourceSplice(anchorId: string, screenLabel: string, note: string, replacement: { oldText: string; newText: string }) {
+    return runDirectArtifactPatch(
+      anchorId,
+      screenLabel,
+      note,
+      "direct-source-splice",
+      (patch) => `선택 영역의 문구를 직접 수정했습니다. ${ARTIFACT_PATH}:${patch.line}`,
+      (source) => applyAnchoredTextReplacement(source, anchorId, replacement.oldText, replacement.newText),
+    );
+  }
+
+  async function runDirectSelectedTextEdit() {
+    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+    const selectedText = previewSelection?.text.trim() || "";
+    const nextText = selectedTextDraft.trim();
+    if (!anchorId || !selectedText || !nextText || busy || nextText === selectedText) return;
+    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+    const note = `직접 텍스트 수정: ${selectedText} -> ${nextText}`;
+    const applied = await runDirectArtifactPatch(
+      anchorId,
+      screenLabel,
+      note,
+      "direct-selected-text-edit",
+      (patch) => `선택 텍스트를 직접 수정했습니다. ${ARTIFACT_PATH}:${patch.line}`,
+      (source) => applyAnchoredLineBreakEdit(source, anchorId, selectedText, nextText),
+    );
+    if (applied) setComponentEdit("");
+  }
+
+  async function runDirectClassAdjustment(kind: "text" | "space", delta: number) {
+    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+    if (!anchorId || busy) return;
+    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+    const label = kind === "text" ? (delta > 0 ? "글자 크게" : "글자 작게") : delta > 0 ? "요소 여백 확대" : "요소 여백 축소";
+    await runDirectArtifactPatch(
+      anchorId,
+      screenLabel,
+      label,
+      kind === "text" ? "direct-text-size-adjust" : "direct-spacing-adjust",
+      (patch) => `${label}를 직접 적용했습니다. ${ARTIFACT_PATH}:${patch.line}`,
+      (source) =>
+        applyAnchoredClassAdjustment(source, anchorId, previewSelection, (className) =>
+          kind === "text" ? adjustTextSizeClasses(className, delta) : adjustElementSpaceClasses(className, delta),
+        ),
+    );
   }
 
   async function runComponentEdit() {
@@ -3620,7 +4071,7 @@ ${effectiveRequest}`;
                   </div>
                 ) : null}
                 <div data-comment-anchor="primary-action" className="mt-2 flex items-center justify-between gap-2">
-                  <div>
+                  <div className="flex gap-1.5">
                     <input
                       id="designforge-attachments"
                       type="file"
@@ -3632,6 +4083,22 @@ ${effectiveRequest}`;
                       }}
                       disabled={busy}
                     />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="min-h-7 px-3 text-[11px]"
+                      onClick={() => {
+                        const imageRequest = input.trim() || "DesignForge에서 사용할 이미지를 생성하세요.";
+                        const attachments = pendingAttachments;
+                        setPendingAttachments([]);
+                        void runImageGenerationRequest(imageRequest, { attachments });
+                      }}
+                      disabled={busy || (!input.trim() && pendingAttachments.length === 0)}
+                      title="Codex $imagegen으로 이미지 에셋을 생성합니다."
+                    >
+                      <ImageIcon size={12} />
+                      이미지
+                    </Button>
                     <Button
                       type="button"
                       variant="secondary"
@@ -4187,6 +4654,7 @@ ${effectiveRequest}`;
                   onClick={() => {
                     setSelectedAnchorId(anchor.id);
                     setPreviewSelection(null);
+                    setSelectedTextDraft("");
                   }}
                   className={cn(
                     "flex min-h-8 items-center justify-between gap-2 rounded-full px-3 text-left text-xs transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
@@ -4206,8 +4674,67 @@ ${effectiveRequest}`;
                   <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
                 </div>
                 {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+                {previewSelection?.path?.length ? <p className="mt-1 truncate font-mono">{previewSelection.path[previewSelection.path.length - 1]}</p> : null}
               </div>
             ) : null}
+
+            <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-[var(--ink)]">선택 요소 직접 조정</p>
+                <Badge tone={previewSelection?.text ? "lime" : selectedAnchorId ? "cyan" : "steel"}>
+                  {previewSelection?.text ? "텍스트 선택" : selectedAnchorId ? "앵커 선택" : "대기"}
+                </Badge>
+              </div>
+              <textarea
+                value={selectedTextDraft}
+                onChange={(event) => setSelectedTextDraft(event.target.value)}
+                className="mt-2 min-h-16 w-full resize-y rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs leading-5 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+                placeholder="프리뷰에서 텍스트를 클릭하면 직접 수정할 수 있습니다. 줄바꿈도 그대로 입력하세요."
+                disabled={busy || !previewSelection?.text}
+              />
+              <div className="mt-2 grid grid-cols-2 gap-1.5">
+                <Button
+                  variant="secondary"
+                  className="min-h-8 px-2 text-[11px]"
+                  onClick={() => void runDirectSelectedTextEdit()}
+                  disabled={busy || !previewSelection?.text || !selectedTextDraft.trim() || selectedTextDraft.trim() === previewSelection.text.trim()}
+                >
+                  줄바꿈/문구 적용
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="min-h-8 px-2 text-[11px]"
+                  onClick={() => void runDirectClassAdjustment("text", -1)}
+                  disabled={busy || !selectedAnchorId}
+                >
+                  글자 작게
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="min-h-8 px-2 text-[11px]"
+                  onClick={() => void runDirectClassAdjustment("text", 1)}
+                  disabled={busy || !selectedAnchorId}
+                >
+                  글자 크게
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="min-h-8 px-2 text-[11px]"
+                  onClick={() => void runDirectClassAdjustment("space", -1)}
+                  disabled={busy || !selectedAnchorId}
+                >
+                  여백 축소
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="col-span-2 min-h-8 px-2 text-[11px]"
+                  onClick={() => void runDirectClassAdjustment("space", 1)}
+                  disabled={busy || !selectedAnchorId}
+                >
+                  여백 확대
+                </Button>
+              </div>
+            </div>
 
             <label className="mt-3 block text-xs font-medium text-[var(--ink)]" htmlFor="component-edit">
               선택 영역 수정 내용

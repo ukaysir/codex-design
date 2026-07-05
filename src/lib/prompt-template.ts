@@ -132,6 +132,39 @@ Output contract:
 - Prefer a strong, finished first screen over scattered partial files.`;
 }
 
+export function buildImageGenerationPrompt(userRequest: string, options: PromptOptions = {}) {
+  const contextPath = options.contextPath ?? ".designforge/context.json";
+  const designSystemPath = options.designSystemPath ?? "DESIGN.md";
+
+  return `You are working inside a DesignForge workspace.
+
+$imagegen
+
+Generate or edit image assets for this DesignForge project using Codex built-in image generation.
+
+Required reading before generating:
+1. ${designSystemPath}
+2. ${contextPath}
+3. Attached files listed in ${contextPath}
+4. Existing assets under assets/ when relevant
+
+Context manifest:
+${options.contextSummary?.trim() || "(context manifest unavailable)"}
+
+User image request:
+${userRequest.trim() || "Create a polished image asset for this design project."}
+
+Output contract:
+- Create final raster image files under assets/generated/.
+- Use descriptive kebab-case filenames.
+- If a generated image is returned in another location, copy or move the chosen final file into assets/generated/.
+- Write .designforge/generated-images.json with updatedAt, request, imageFiles, sourcePrompt, and notes.
+- If the user explicitly asks to place the image into the screen, update src/generated/Screen.tsx and DESIGN.md while preserving existing anchors.
+- Otherwise do not modify the screen; only create image assets and the manifest.
+- Do not invent copyrighted logos, protected characters, or brand marks unless the user supplied the asset or rights context.
+- Summarize the created files and any assumptions.`;
+}
+
 export function buildDesignClarificationPrompt(
   userRequest: string,
   options: PromptOptions & {
