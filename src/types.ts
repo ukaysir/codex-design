@@ -22,6 +22,8 @@ export type CommandResult = {
   code: number | null;
   stdout: string;
   stderr: string;
+  sessionId?: string | null;
+  usedResume?: boolean;
 };
 
 export type PreviewInfo = {
@@ -103,6 +105,8 @@ export type RunRecord = {
   previewUrl?: string;
   previewStatus?: PreviewManifest["status"];
   codexExitCode: number | null;
+  codexSessionId?: string;
+  codexUsedResume?: boolean;
   stdoutPreview: string;
   stderrPreview: string;
   repairAttempts?: number;

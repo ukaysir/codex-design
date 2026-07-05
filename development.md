@@ -30,8 +30,10 @@ The user types one request. DesignForge automatically runs the internal pipeline
 16. Write `outputs/handoff/README.md` with verification, preview, screenshot, console, and critique evidence.
 17. Package handoff files to `outputs/exports/designforge-handoff.zip`.
 18. Index `data-comment-anchor` values into `.designforge/anchors.json`.
-19. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
-20. Refresh artifacts and logs.
+19. Let the user select a generated component through preview click-selection or the anchor list.
+20. Compile selected component edits with `<mentioned-element>` and `@anchor` context.
+21. Store the chat request as feedback in `.designforge/comments.jsonl`, including `@anchor` references when present.
+22. Refresh artifacts and logs.
 
 No clarifying-question flow by default. If context is missing, the agent records assumptions in `DESIGN.md` and proceeds.
 
@@ -52,17 +54,37 @@ The reference prompt is not mainly about UI chrome. It is about disciplined desi
 
 DesignForge should implement those ideas as app structure, not as visible navigation.
 
+## Claude Design Alignment Audit
+
+`claude-design.md` was reviewed as a 9,200-line behavior reference. Its structure breaks down into:
+
+- core workflow, document reading, output creation, anchor preservation, screen labelling, questions, and verification
+- Design Component authoring rules, small edit discipline, tweakable props, and direct-edit constraints
+- domain skills for canvas, animation, decks, docs, frontend design, wireframes, exports, handoff, and design-system creation
+- file/tool contracts and starter component source code
+
+DesignForge intentionally translates the behavior rather than copying Claude's private runtime:
+
+- DC files become a React/Tailwind `src/generated/Screen.tsx` artifact because this app previews Vite workspaces.
+- `<mentioned-element>` becomes a preview selection bridge that posts selected `data-comment-anchor`, screen label, tag, text, and DOM path back to the host.
+- `data-comment-anchor` and `data-screen-label` remain mandatory continuity primitives.
+- "Small targeted change" becomes an anchored request mode that edits the selected semantic region and preserves unrelated layout, spacing, typography, colors, copy, and anchors.
+- "Create/update design system first" becomes persistent `DESIGN.md`; the prompt now treats it as the continuing source of truth, with component inventory and revision rules.
+- "Make tweakable" maps to component-level edit requests today; true source-level inline text/style splicing is a next step.
+
 ## Current App Shape
 
 The app now has:
 
 - One chat input
+- Component-level edit panel
 - Automatic pipeline status
 - DesignForge workbench preview surface
 - Artifact list
 - Verification evidence
 - Run history and export actions
 - System log
+- Preview click-selection bridge for anchored generated regions
 - Hidden workspace/prompt/Codex machinery
 
 The old feature navigation is intentionally removed. Workspace, Prompt Studio, Files, Preview, Settings, and Logs become internal modules, not top-level user destinations.
@@ -131,6 +153,9 @@ The prompt compiler should always produce a deterministic prompt with:
 - instruction not to ask questions
 - instruction to record assumptions in `DESIGN.md`
 - exact artifact path
+- request classification: targeted component edit, system revision, or fresh design
+- continuing design-system rule: preserve `DESIGN.md` and current artifact unless the request explicitly asks for a new direction
+- selected-anchor rule: requests containing `@anchor` or `<mentioned-element>` edit that semantic region first
 - small-edit discipline
 - anti-slop rules
 - accessibility and semantic HTML requirements
@@ -206,6 +231,8 @@ Internal:
 - verification runner
 - one-pass repair runner
 - artifact indexer
+- preview selection bridge
+- selected component edit compiler
 - handoff writer
 - feedback memory writer
 - anchor indexer
@@ -282,7 +309,7 @@ Status: implemented for current bottlenecks.
 
 ### Phase 5 - Feedback Loop
 
-Status: partially implemented.
+Status: implemented for anchored component feedback.
 
 - Add user notes attached to artifact path. Chat-level feedback records are implemented.
 - Store `@anchor-name` references when chat feedback targets an element.
@@ -290,6 +317,11 @@ Status: partially implemented.
 - Add simple comment records. `.designforge/comments.jsonl` is implemented.
 - Preserve and generate `data-screen-label` and `data-comment-anchor` in prompt instructions.
 - Compile feedback into the next Codex run. Recent feedback is injected into `prompts/latest.md`.
+- Inject a preview selection bridge into the workspace `src/App.tsx` wrapper.
+- Let users click anchored regions in the live preview while selection mode is active.
+- Show anchor-list fallback selection when preview click selection is unavailable.
+- Compile selected component edits as targeted requests with `<mentioned-element>` context.
+- Strengthen generated prompts to classify requests and avoid full-screen rewrites for component-level edits.
 
 ### Phase 6 - Export And Handoff
 
@@ -308,6 +340,7 @@ Verified on Windows after dependency installation and Tauri resource repair:
 - `npm run typecheck` passes.
 - `node ./node_modules/typescript/bin/tsc --noEmit --noUnusedLocals --noUnusedParameters --pretty false` passes.
 - `npm run build` passes.
+- `designforge-workspace`: `npm run typecheck` and `npm run build` pass with the preview selection bridge.
 - `cargo check --manifest-path src-tauri/Cargo.toml` passes.
 - `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` passes.
 - `npx --yes knip --reporter compact` passes with no unused-code findings.
@@ -328,21 +361,26 @@ Verified on Windows after dependency installation and Tauri resource repair:
    - Distinguish dependency install failure, Codex CLI failure, verification failure, preview failure, screenshot failure, console failure, critique rollback, and export failure.
    - Add a retry action for failed stages where the previous artifacts are still valid.
 
-3. Performance profiling
+3. Direct edit splicing
+   - For simple text-only or color-only component edits, patch the source region directly before invoking Codex.
+   - Preserve the Codex targeted-edit path for structural changes, copy rewrites, and ambiguous requests.
+   - Add a manifest entry showing whether an edit was direct-spliced or Codex-assisted.
+
+4. Performance profiling
    - Add per-stage duration markers for Codex, verification, preview startup, screenshot capture, console capture, critique, and export.
    - Persist the slowest stage in each run record so repeated lag reports have evidence.
    - Add a lightweight UI indicator when the backend is running a blocking worker task.
 
-4. Export expansion
+5. Export expansion
    - Add standalone HTML export from the generated workspace.
    - Keep PDF/PPTX as later formats after standalone HTML is reliable.
    - Include a machine-readable export manifest beside the zip.
 
-5. Settings surface
+6. Settings surface
    - Add UI controls for workspace path, Codex path, package manager, and browser path.
    - Persist these settings in local storage and mirror workspace-scoped settings where appropriate.
 
-6. Screenshot and critique evidence
+7. Screenshot and critique evidence
    - Add richer screenshot metadata: viewport size, browser path, capture duration, image dimensions, and file size.
    - Add console summary metadata to `.designforge/critique.json` and handoff README.
 

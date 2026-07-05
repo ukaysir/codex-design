@@ -6,6 +6,7 @@ import {
   FolderOpen,
   History,
   Loader2,
+  MousePointer2,
   Play,
   Send,
   Square,
@@ -13,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   buildCritiquePrompt,
   buildDesignSystemSeed,
@@ -21,6 +22,7 @@ import {
   buildStructuredPrompt,
 } from "./lib/prompt-template";
 import { callTauri } from "./lib/tauri";
+import { WORKSPACE_SELECTION_APP_TSX } from "./lib/workspace-bridge";
 import type {
   AnchorInfo,
   AnchorManifest,
@@ -50,6 +52,8 @@ const DEFAULT_SETTINGS: Settings = {
 const ARTIFACT_PATH = "src/generated/Screen.tsx";
 const DEFAULT_WORKSPACE = "designforge-workspace";
 const RUNS_PATH = ".designforge/runs.jsonl";
+const CHAT_PATH = ".designforge/chat.jsonl";
+const CODEX_SESSION_PATH = ".designforge/codex-session.json";
 const PROMPT_PATH = "prompts/latest.md";
 const REPAIR_PROMPT_PATH = "prompts/repair-latest.md";
 const CRITIQUE_PROMPT_PATH = "prompts/critique-latest.md";
@@ -61,16 +65,22 @@ const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
 const COMMENTS_PATH = ".designforge/comments.jsonl";
 const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
 const CONSOLE_PATH = "outputs/console/latest.json";
-const MAX_LOGS = 80;
+const MAX_LOGS = 300;
 const LOG_PREVIEW_CHARS = 2000;
+
+type ChatKind = "chat" | "status" | "tool" | "summary";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: string;
+  kind?: ChatKind;
+  level?: LogLevel;
 };
 
 type StepStatus = "idle" | "active" | "done" | "error";
+type NavKey = "workbench" | "design" | "history" | "verify";
 
 type PipelineStep = {
   id: string;
@@ -81,20 +91,50 @@ type PipelineStep = {
 
 type FileSnapshot = Array<{ relativePath: string; content: string | null }>;
 
+type PreviewSelection = {
+  anchorId: string;
+  screenLabel: string;
+  tagName: string;
+  text: string;
+  path: string[];
+};
+
+type RunRequestOptions = {
+  displayRequest?: string;
+  commentNote?: string;
+  anchorId?: string;
+  screenLabel?: string;
+};
+
+type CodexSessionManifest = {
+  sessionId: string;
+  updatedAt: string;
+  resetAt?: string;
+  lastLabel?: string;
+  lastUsedResume?: boolean;
+};
+
+const NAV_ITEMS: Array<{ key: NavKey; label: string; anchor: string }> = [
+  { key: "workbench", label: "작업대", anchor: "preview" },
+  { key: "design", label: "디자인 시스템", anchor: "feature-list" },
+  { key: "history", label: "생성 기록", anchor: "run-history" },
+  { key: "verify", label: "검증 로그", anchor: "verification" },
+];
+
 const START_STEPS: PipelineStep[] = [
   { id: "context", label: "Context", detail: "Create or open the workspace", status: "idle" },
   { id: "design", label: "Design system", detail: "Infer DESIGN.md from the chat", status: "idle" },
   { id: "prompt", label: "Prompt", detail: "Compile the Codex Design brief", status: "idle" },
   { id: "codex", label: "Codex", detail: "Run the local Codex CLI", status: "idle" },
   { id: "artifact", label: "Artifact", detail: "Refresh generated files", status: "idle" },
-  { id: "verify", label: "Verify", detail: "Typecheck and build the generated workspace", status: "idle" },
-  { id: "repair", label: "Repair", detail: "Ask Codex to fix failed verification once", status: "idle" },
-  { id: "preview", label: "Preview", detail: "Start the local preview server", status: "idle" },
-  { id: "screenshot", label: "Screenshot", detail: "Capture preview evidence", status: "idle" },
-  { id: "console", label: "Console", detail: "Capture runtime console evidence", status: "idle" },
-  { id: "critique", label: "Critique", detail: "Run screenshot-driven critique pass", status: "idle" },
-  { id: "handoff", label: "Handoff", detail: "Write implementation handoff notes", status: "idle" },
-  { id: "export", label: "Export", detail: "Package handoff files", status: "idle" },
+  { id: "verify", label: "Verify", detail: "Manual TypeScript and Vite check", status: "idle" },
+  { id: "repair", label: "Repair", detail: "Manual Codex repair after failed verification", status: "idle" },
+  { id: "preview", label: "Preview", detail: "Manual local preview server", status: "idle" },
+  { id: "screenshot", label: "Screenshot", detail: "Manual preview evidence capture", status: "idle" },
+  { id: "console", label: "Console", detail: "Manual runtime console capture", status: "idle" },
+  { id: "critique", label: "Critique", detail: "Manual screenshot-driven critique pass", status: "idle" },
+  { id: "handoff", label: "Handoff", detail: "Manual implementation handoff notes", status: "idle" },
+  { id: "export", label: "Export", detail: "Manual package handoff files", status: "idle" },
 ];
 
 function loadSettings() {
@@ -121,6 +161,20 @@ function now() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function createIntroMessages(): ChatMessage[] {
+  return [
+    {
+      id: "intro",
+      role: "assistant",
+      content:
+        "DesignForge에게 요청하면 Codex 대화 세션을 이어서 실제 앱 파일을 변경합니다. 검증, 프리뷰, 캡처, 크리틱, export는 오른쪽 작업 버튼으로 필요할 때만 실행합니다.",
+      createdAt: now(),
+      kind: "summary",
+      level: "info",
+    },
+  ];
+}
+
 function Button({
   children,
   variant = "secondary",
@@ -131,11 +185,11 @@ function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
-        variant === "primary" && "bg-[var(--primary)] text-[#14170f] hover:bg-[var(--primary-strong)]",
+        "inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+        variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] hover:bg-[var(--primary-strong)]",
         variant === "secondary" &&
-          "border border-[var(--line)] bg-[var(--panel-2)] text-[var(--ink)] hover:border-[var(--accent)] hover:bg-[var(--panel-3)]",
-        variant === "ghost" && "text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--ink)]",
+          "border border-[var(--line-strong)] bg-white text-[var(--ink)] hover:bg-[var(--panel-2)]",
+        variant === "ghost" && "border border-transparent text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--ink)]",
         className,
       )}
     >
@@ -152,17 +206,17 @@ function Badge({
   tone?: "lime" | "cyan" | "amber" | "danger" | "steel";
 }) {
   const styles = {
-    lime: "border-lime-300/35 bg-lime-300/10 text-lime-100",
-    cyan: "border-cyan-300/35 bg-cyan-300/10 text-cyan-100",
-    amber: "border-amber-300/35 bg-amber-300/10 text-amber-100",
-    danger: "border-red-300/35 bg-red-300/10 text-red-100",
-    steel: "border-zinc-500/35 bg-zinc-800/70 text-zinc-300",
+    lime: "border-[var(--line-strong)] bg-white text-[var(--ink)]",
+    cyan: "border-black bg-black text-white",
+    amber: "border-amber-200 bg-amber-50 text-amber-800",
+    danger: "border-red-200 bg-red-50 text-red-700",
+    steel: "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]",
   };
 
   return (
     <span
       className={cn(
-        "inline-flex min-h-6 shrink-0 items-center whitespace-nowrap rounded border px-2 text-[11px] font-medium",
+        "inline-flex min-h-7 shrink-0 items-center whitespace-nowrap rounded-full border px-3 text-[11px] font-medium",
         styles[tone],
       )}
     >
@@ -195,6 +249,10 @@ function truncatePath(path: string) {
   return path.length > 42 ? `...${path.slice(-39)}` : path;
 }
 
+function shortSessionId(sessionId: string) {
+  return sessionId.length > 12 ? `${sessionId.slice(0, 8)}...` : sessionId;
+}
+
 function trimLog(message: string) {
   const clean = message.trim();
   if (!clean) return "(empty output)";
@@ -208,26 +266,62 @@ function sameWorkspaceFiles(left: WorkspaceFile[], right: WorkspaceFile[]) {
   );
 }
 
+function previewFrameSrc(url: string, selectionMode: boolean) {
+  if (!selectionMode) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}designforgeSelect=1`;
+}
+
+function isPreviewSelection(value: unknown): value is PreviewSelection & { source: "designforge-preview-select" } {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Partial<PreviewSelection> & { source?: unknown };
+  return data.source === "designforge-preview-select" && typeof data.anchorId === "string" && data.anchorId.length > 0;
+}
+
+function buildTargetedComponentRequest(anchorId: string, screenLabel: string, note: string, selection: PreviewSelection | null) {
+  const elementLines = [
+    "<mentioned-element>",
+    "source: DesignForge preview click",
+    `dom: [data-screen-label="${screenLabel}"] [data-comment-anchor="${anchorId}"]`,
+    selection?.tagName ? `tag: ${selection.tagName}` : "",
+    selection?.text ? `text: ${selection.text}` : "",
+    selection?.path?.length ? `path: ${selection.path.join(" > ")}` : "",
+    "</mentioned-element>",
+  ].filter(Boolean);
+
+  return `${elementLines.join("\n")}
+
+Targeted edit for @${anchorId}:
+${note}
+
+Apply this as a small component-level revision. Preserve the current DESIGN.md visual system, the existing screen, unrelated layout, spacing, typography, colors, copy, data-screen-label, and all data-comment-anchor values. If the selected anchor is not the right source location, make the narrowest safe edit and explain the assumption in DESIGN.md. Do not regenerate the whole screen unless the user explicitly asks for a fresh design.`;
+}
+
 export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [workspacePath, setWorkspacePath] = useState(settings.lastWorkspacePath);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [activeNav, setActiveNav] = useState<NavKey>("workbench");
   const [steps, setSteps] = useState<PipelineStep[]>(START_STEPS);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "intro",
-      role: "assistant",
-      content:
-        "채팅에 만들고 싶은 프론트엔드 화면을 적으면 claude-design 기준으로 DESIGN.md, prompt, Codex 실행, 검증, preview를 자동 처리합니다.",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(createIntroMessages);
   const [logs, setLogs] = useState<LogEvent[]>([
     { id: "boot", level: "info", timestamp: now(), message: "Chat-first DesignForge ready." },
   ]);
+  const [showAllLogs, setShowAllLogs] = useState(false);
   const [runHistory, setRunHistory] = useState<RunRecord[]>([]);
   const [preview, setPreview] = useState<PreviewInfo | null>(null);
+  const [codexSession, setCodexSession] = useState<CodexSessionManifest | null>(null);
+  const [anchorManifest, setAnchorManifest] = useState<AnchorManifest | null>(null);
+  const [selectedAnchorId, setSelectedAnchorId] = useState("");
+  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [componentEdit, setComponentEdit] = useState("");
+  const [manualVerifyResult, setManualVerifyResult] = useState<CommandResult | null>(null);
+  const [manualConsoleInfo, setManualConsoleInfo] = useState<ConsoleInfo | null>(null);
+  const [manualScreenshotInfo, setManualScreenshotInfo] = useState<ScreenshotInfo | null>(null);
+  const [manualCritique, setManualCritique] = useState<CritiqueManifest | null>(null);
+  const [manualExportPath, setManualExportPath] = useState("");
 
   const visibleFiles = useMemo(
     () =>
@@ -237,6 +331,8 @@ export default function App() {
           [
             "DESIGN.md",
             "AGENTS.md",
+            CHAT_PATH,
+            CODEX_SESSION_PATH,
             PROMPT_PATH,
             REPAIR_PROMPT_PATH,
             CRITIQUE_PROMPT_PATH,
@@ -257,6 +353,39 @@ export default function App() {
     [files],
   );
 
+  useEffect(() => {
+    function handlePreviewMessage(event: MessageEvent) {
+      if (!isPreviewSelection(event.data)) return;
+      const selection: PreviewSelection = {
+        anchorId: event.data.anchorId,
+        screenLabel: event.data.screenLabel || "Generated Screen",
+        tagName: event.data.tagName || "element",
+        text: event.data.text || "",
+        path: Array.isArray(event.data.path) ? event.data.path.filter((item) => typeof item === "string") : [],
+      };
+      setSelectedAnchorId(selection.anchorId);
+      setPreviewSelection(selection);
+    }
+
+    window.addEventListener("message", handlePreviewMessage);
+    return () => window.removeEventListener("message", handlePreviewMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!workspacePath) return;
+    void (async () => {
+      try {
+        await refreshFiles(workspacePath);
+        await loadRunHistory(workspacePath);
+        await loadCodexSession(workspacePath);
+        await loadAnchorManifest(workspacePath);
+        await loadChatHistory(workspacePath);
+      } catch (error) {
+        pushLog("error", `Could not load workspace state: ${textFromError(error)}`);
+      }
+    })();
+  }, [workspacePath]);
+
   function patchSettings(patch: Partial<Settings>) {
     setSettings((current) => {
       const next = { ...current, ...patch };
@@ -272,8 +401,79 @@ export default function App() {
     ]);
   }
 
-  function pushMessage(role: ChatMessage["role"], content: string) {
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role, content }]);
+  function activateNav(item: (typeof NAV_ITEMS)[number]) {
+    setActiveNav(item.key);
+    const target = document.querySelector<HTMLElement>(`[data-comment-anchor="${item.anchor}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+  }
+
+  function createChatMessage(
+    role: ChatMessage["role"],
+    content: string,
+    kind: ChatKind = "chat",
+    level?: LogLevel,
+  ): ChatMessage {
+    return {
+      id: crypto.randomUUID(),
+      role,
+      content,
+      createdAt: new Date().toISOString(),
+      kind,
+      level,
+    };
+  }
+
+  function pushMessage(role: ChatMessage["role"], content: string, kind: ChatKind = "chat", level?: LogLevel) {
+    const message = createChatMessage(role, content, kind, level);
+    setMessages((current) => [...current, message]);
+    return message;
+  }
+
+  async function appendChatMessage(
+    path: string,
+    role: ChatMessage["role"],
+    content: string,
+    kind: ChatKind = "chat",
+    level?: LogLevel,
+  ) {
+    const message = pushMessage(role, content, kind, level);
+    try {
+      let raw = "";
+      try {
+        raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CHAT_PATH });
+      } catch {
+        raw = "";
+      }
+      await callTauri("write_file", {
+        workspacePath: path,
+        relativePath: CHAT_PATH,
+        content: `${raw.trimEnd()}\n${JSON.stringify(message)}\n`.trimStart(),
+      });
+    } catch (error) {
+      pushLog("error", `Could not persist chat message: ${textFromError(error)}`);
+    }
+    return message;
+  }
+
+  async function loadChatHistory(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CHAT_PATH });
+      const records = raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Partial<ChatMessage>)
+        .filter(
+          (message): message is ChatMessage =>
+            typeof message.id === "string" &&
+            (message.role === "user" || message.role === "assistant") &&
+            typeof message.content === "string" &&
+            typeof message.createdAt === "string",
+        );
+      setMessages(records.length ? records.slice(-80) : createIntroMessages());
+    } catch {
+      setMessages(createIntroMessages());
+    }
   }
 
   function setStep(id: string, status: StepStatus) {
@@ -317,6 +517,105 @@ export default function App() {
       setRunHistory(records.slice(-8).reverse());
     } catch {
       setRunHistory([]);
+    }
+  }
+
+  async function loadCodexSession(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: CODEX_SESSION_PATH });
+      const manifest = JSON.parse(raw) as Partial<CodexSessionManifest>;
+      if (typeof manifest.sessionId !== "string" || !manifest.sessionId.trim()) {
+        setCodexSession(null);
+        return null;
+      }
+      const next: CodexSessionManifest = {
+        sessionId: manifest.sessionId.trim(),
+        updatedAt: typeof manifest.updatedAt === "string" ? manifest.updatedAt : new Date().toISOString(),
+        resetAt: typeof manifest.resetAt === "string" ? manifest.resetAt : undefined,
+        lastLabel: typeof manifest.lastLabel === "string" ? manifest.lastLabel : undefined,
+        lastUsedResume: typeof manifest.lastUsedResume === "boolean" ? manifest.lastUsedResume : undefined,
+      };
+      setCodexSession(next);
+      return next;
+    } catch {
+      setCodexSession(null);
+      return null;
+    }
+  }
+
+  async function saveCodexSession(path: string, result: CommandResult, label: string) {
+    if (!result.sessionId) return codexSession;
+    const manifest: CodexSessionManifest = {
+      sessionId: result.sessionId,
+      updatedAt: new Date().toISOString(),
+      lastLabel: label,
+      lastUsedResume: result.usedResume,
+    };
+    await callTauri("write_file", {
+      workspacePath: path,
+      relativePath: CODEX_SESSION_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    setCodexSession(manifest);
+    pushLog("success", `${result.usedResume ? "Resumed" : "Stored"} Codex session: ${result.sessionId.slice(0, 8)}...`);
+    return manifest;
+  }
+
+  async function resetCodexSession(path = workspacePath) {
+    const target = path || (await ensureWorkspace());
+    const manifest = {
+      sessionId: "",
+      updatedAt: new Date().toISOString(),
+      resetAt: new Date().toISOString(),
+    };
+    await callTauri("write_file", {
+      workspacePath: target,
+      relativePath: CODEX_SESSION_PATH,
+      content: JSON.stringify(manifest, null, 2),
+    });
+    setCodexSession(null);
+    setSelectedAnchorId("");
+    setPreviewSelection(null);
+    setComponentEdit("");
+    pushLog("info", "Codex session reset. Next design run will start fresh.");
+    await refreshFiles(target);
+  }
+
+  async function loadAnchorManifest(path: string) {
+    try {
+      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: ANCHORS_PATH });
+      const manifest = JSON.parse(raw) as AnchorManifest;
+      setAnchorManifest(manifest);
+      return manifest;
+    } catch {
+      setAnchorManifest(null);
+      return null;
+    }
+  }
+
+  async function ensurePreviewSelectionBridge(path: string) {
+    try {
+      const current = await callTauri<string>("read_file", { workspacePath: path, relativePath: "src/App.tsx" });
+      if (current.includes("DesignForgeSelectionBridge")) return;
+
+      const isDefaultWrapper =
+        current.includes('import Screen from "./generated/Screen"') &&
+        current.includes("return <Screen />") &&
+        current.length < 500;
+
+      if (!isDefaultWrapper) {
+        pushLog("info", "Workspace src/App.tsx is custom; preview click selection will use the anchor list fallback.");
+        return;
+      }
+
+      await callTauri("write_file", {
+        workspacePath: path,
+        relativePath: "src/App.tsx",
+        content: WORKSPACE_SELECTION_APP_TSX,
+      });
+      pushLog("success", "Enabled preview click selection bridge.");
+    } catch (error) {
+      pushLog("error", `Could not enable preview selection bridge: ${textFromError(error)}`);
     }
   }
 
@@ -448,6 +747,7 @@ export default function App() {
       relativePath: ANCHORS_PATH,
       content: JSON.stringify(manifest, null, 2),
     });
+    setAnchorManifest(manifest);
     pushLog("success", `Indexed ${manifest.anchors.length} comment anchors.`);
     return manifest;
   }
@@ -540,12 +840,16 @@ export default function App() {
 
   function pushCommandResult(label: string, result: CommandResult) {
     pushLog(result.success ? "success" : "error", `${label}: exit ${result.code ?? "unknown"}`);
+    if (result.sessionId) {
+      pushLog("info", `${label}: Codex session ${shortSessionId(result.sessionId)} (${result.usedResume ? "resumed" : "fresh"})`);
+    }
     if (result.stdout.trim()) pushLog("info", result.stdout);
     if (result.stderr.trim()) pushLog("error", result.stderr);
   }
 
   async function startPreview(path = workspacePath) {
     if (!path) throw new Error("Open or create a workspace first.");
+    await ensurePreviewSelectionBridge(path);
     const info = await callTauri<PreviewInfo>("start_preview", {
       workspacePath: path,
       packageManager: settings.packageManager,
@@ -562,12 +866,16 @@ export default function App() {
   async function startPreviewSafely() {
     setStep("preview", "active");
     try {
-      await startPreview();
+      const target = workspacePath || (await ensureWorkspace());
+      await appendChatMessage(target, "assistant", "사용자 요청으로 Vite preview 서버를 시작합니다.", "tool", "info");
+      const info = await startPreview(target);
       setStep("preview", "done");
+      await appendChatMessage(target, "assistant", `미리보기가 실행 중입니다: ${info.url}`, "tool", "success");
     } catch (error) {
       setStep("preview", "error");
       if (workspacePath) {
         await savePreviewManifest(workspacePath, previewManifest("error", { error: textFromError(error) }));
+        await appendChatMessage(workspacePath, "assistant", `미리보기 시작 실패: ${textFromError(error)}`, "tool", "error");
       }
       pushLog("error", `Preview unavailable: ${textFromError(error)}`);
     }
@@ -579,7 +887,9 @@ export default function App() {
       await savePreviewManifest(workspacePath, previewManifest("stopped"));
     }
     setPreview(null);
+    setSelectionMode(false);
     pushLog("info", "Preview stopped.");
+    if (workspacePath) await appendChatMessage(workspacePath, "assistant", "미리보기를 중지했습니다.", "tool", "info");
   }
 
   async function stopPreviewSafely() {
@@ -600,12 +910,15 @@ export default function App() {
   }
 
   async function runCodexPrompt(path: string, prompt: string, label: string) {
+    const session = await loadCodexSession(path);
     const result = await callTauri<CommandResult>("run_codex", {
       workspacePath: path,
       codexPath: settings.codexPath,
       prompt,
+      resumeSessionId: session?.sessionId ?? null,
     });
     pushCommandResult(label, result);
+    await saveCodexSession(path, result, label);
     if (!result.success) throw new Error(`${label} failed.`);
     return result;
   }
@@ -627,6 +940,11 @@ export default function App() {
     } catch {
       designSystem = "DESIGN.md was unavailable when the handoff was created.";
     }
+    const verificationStatus = verifyResult.stdout === "Verification not requested."
+      ? "not requested"
+      : verifyResult.success
+        ? "passed"
+        : "failed";
 
     const content = `# Handoff: Generated Screen
 
@@ -642,11 +960,11 @@ These files are local design references and implementation starting points. Recr
 
 ## Fidelity
 
-High-fidelity frontend screen, verified with TypeScript and Vite build checks.${repairAttempts ? ` Verification required ${repairAttempts} automatic repair pass.` : ""}
+High-fidelity frontend screen generated from this request. TypeScript/Vite verification status is listed below.${repairAttempts ? ` Verification required ${repairAttempts} automatic repair pass.` : ""}
 
 ## Verification & Preview
 
-- TypeScript/Vite verification: ${verifyResult.success ? "passed" : "failed"}
+- TypeScript/Vite verification: ${verificationStatus}
 - Verification exit code: ${verifyResult.code ?? "unknown"}
 - Preview status: ${currentPreview?.status ?? "not-started"}
 ${currentPreview?.url ? `- Preview URL: ${currentPreview.url}` : ""}
@@ -742,40 +1060,307 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
     }
   }
 
+  async function ensureActionWorkspace() {
+    const path = workspacePath || (await ensureWorkspace());
+    await ensurePreviewSelectionBridge(path);
+    await loadChatHistory(path);
+    return path;
+  }
+
+  async function runManualVerify() {
+    if (busy) return;
+    setBusy(true);
+    setStep("verify", "active");
+    try {
+      const path = await ensureActionWorkspace();
+      await appendChatMessage(path, "assistant", "사용자 요청으로 TypeScript/Vite 검증을 실행합니다.", "tool", "info");
+      const result = await verifyWorkspace(path);
+      setManualVerifyResult(result);
+      setStep("verify", result.success ? "done" : "error");
+      await appendChatMessage(
+        path,
+        "assistant",
+        result.success ? "검증이 통과했습니다." : `검증이 실패했습니다. exit ${result.code ?? "unknown"}`,
+        "tool",
+        result.success ? "success" : "error",
+      );
+    } catch (error) {
+      const message = textFromError(error);
+      setStep("verify", "error");
+      pushLog("error", message);
+      if (workspacePath) await appendChatMessage(workspacePath, "assistant", `검증 실행 중단: ${message}`, "tool", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runManualRepair() {
+    if (busy || !manualVerifyResult || manualVerifyResult.success) return;
+    setBusy(true);
+    setStep("repair", "active");
+    try {
+      const path = await ensureActionWorkspace();
+      await appendChatMessage(path, "assistant", "사용자 요청으로 검증 실패 수리 프롬프트를 Codex에 전달합니다.", "tool", "info");
+      const repairPrompt = await writeRepairPrompt(path, latestRun?.request ?? "Manual DesignForge repair", manualVerifyResult);
+      await runCodexPrompt(path, repairPrompt, "Codex repair");
+      setStep("repair", "done");
+
+      setStep("artifact", "active");
+      await refreshFiles(path);
+      await writeAnchorManifest(path);
+      setStep("artifact", "done");
+      setManualVerifyResult(null);
+      await appendChatMessage(path, "assistant", "수리 변경을 반영했습니다. 검증은 자동 재실행하지 않았습니다. 필요하면 검증 실행을 다시 누르세요.", "tool", "success");
+    } catch (error) {
+      const message = textFromError(error);
+      setStep("repair", "error");
+      pushLog("error", message);
+      if (workspacePath) await appendChatMessage(workspacePath, "assistant", `수리 실행 중단: ${message}`, "tool", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runManualCapture() {
+    if (busy || !preview) return;
+    setBusy(true);
+    setStep("console", "active");
+    setStep("screenshot", "active");
+    try {
+      const path = await ensureActionWorkspace();
+      await appendChatMessage(path, "assistant", "사용자 요청으로 콘솔 로그와 스크린샷을 캡처합니다.", "tool", "info");
+
+      try {
+        const consoleCapture = await captureConsole(path, preview.url);
+        setManualConsoleInfo(consoleCapture);
+        setStep("console", "done");
+      } catch (error) {
+        setStep("console", "error");
+        pushLog("error", `Console capture unavailable: ${textFromError(error)}`);
+      }
+
+      try {
+        const screenshotCapture = await captureScreenshot(path, preview.url);
+        setManualScreenshotInfo(screenshotCapture);
+        setStep("screenshot", "done");
+      } catch (error) {
+        setStep("screenshot", "error");
+        pushLog("error", `Screenshot unavailable: ${textFromError(error)}`);
+      }
+
+      await refreshFiles(path);
+      await appendChatMessage(path, "assistant", "캡처 작업이 끝났습니다. 결과 파일은 아티팩트 목록과 시스템 로그에서 확인할 수 있습니다.", "tool", "success");
+    } catch (error) {
+      const message = textFromError(error);
+      setStep("console", "error");
+      setStep("screenshot", "error");
+      pushLog("error", message);
+      if (workspacePath) await appendChatMessage(workspacePath, "assistant", `캡처 실행 중단: ${message}`, "tool", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runManualCritique() {
+    if (busy) return;
+    setBusy(true);
+    setStep("critique", "active");
+    try {
+      const path = await ensureActionWorkspace();
+      await appendChatMessage(path, "assistant", "사용자 요청으로 스크린샷 기반 크리틱 패스를 시작합니다.", "tool", "info");
+
+      let consoleInfo = manualConsoleInfo;
+      let screenshot = manualScreenshotInfo;
+
+      if (preview?.url && !consoleInfo) {
+        setStep("console", "active");
+        try {
+          consoleInfo = await captureConsole(path, preview.url);
+          setManualConsoleInfo(consoleInfo);
+          setStep("console", "done");
+        } catch (error) {
+          setStep("console", "error");
+          pushLog("error", `Console capture unavailable before critique: ${textFromError(error)}`);
+        }
+      }
+
+      if (preview?.url && !screenshot) {
+        setStep("screenshot", "active");
+        try {
+          screenshot = await captureScreenshot(path, preview.url);
+          setManualScreenshotInfo(screenshot);
+          setStep("screenshot", "done");
+        } catch (error) {
+          setStep("screenshot", "error");
+          pushLog("error", `Screenshot unavailable before critique: ${textFromError(error)}`);
+        }
+      }
+
+      let critique = await writeCritiquePrompt(path, latestRun?.request ?? "Manual DesignForge critique", screenshot, consoleInfo);
+      setManualCritique(critique);
+      if (!screenshot) {
+        setStep("critique", "error");
+        await appendChatMessage(
+          path,
+          "assistant",
+          "스크린샷이 없어 크리틱 프롬프트만 준비했습니다. 미리보기를 시작하고 캡처한 뒤 다시 실행하세요.",
+          "tool",
+          "error",
+        );
+        await refreshFiles(path);
+        return;
+      }
+
+      const snapshot = await snapshotGeneratedFiles(path);
+      try {
+        const critiquePrompt = await callTauri<string>("read_file", {
+          workspacePath: path,
+          relativePath: CRITIQUE_PROMPT_PATH,
+        });
+        await runCodexPrompt(path, critiquePrompt, "Codex critique");
+
+        setStep("verify", "active");
+        const verifyResult = await verifyWorkspace(path);
+        setManualVerifyResult(verifyResult);
+        if (!verifyResult.success) {
+          setStep("verify", "error");
+          throw new Error("Critique pass broke workspace verification.");
+        }
+        setStep("verify", "done");
+
+        critique = { ...critique, status: "applied", updatedAt: new Date().toISOString() };
+        await saveCritiqueManifest(path, critique);
+        setManualCritique(critique);
+        await refreshFiles(path);
+        await writeAnchorManifest(path);
+        setStep("critique", "done");
+        await appendChatMessage(path, "assistant", "크리틱 패스를 적용했고 검증까지 통과했습니다.", "tool", "success");
+      } catch (error) {
+        await restoreGeneratedFiles(path, snapshot);
+        critique = {
+          ...critique,
+          status: "failed",
+          updatedAt: new Date().toISOString(),
+          error: textFromError(error),
+        };
+        await saveCritiqueManifest(path, critique);
+        setManualCritique(critique);
+        setStep("critique", "error");
+        await refreshFiles(path);
+        await appendChatMessage(path, "assistant", `크리틱 변경을 롤백했습니다: ${textFromError(error)}`, "tool", "error");
+      }
+    } catch (error) {
+      const message = textFromError(error);
+      setStep("critique", "error");
+      pushLog("error", message);
+      if (workspacePath) await appendChatMessage(workspacePath, "assistant", `크리틱 실행 중단: ${message}`, "tool", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runManualExport() {
+    if (busy) return;
+    setBusy(true);
+    setStep("handoff", "active");
+    try {
+      const path = await ensureActionWorkspace();
+      await appendChatMessage(path, "assistant", "사용자 요청으로 핸드오프와 export 패키지를 생성합니다.", "tool", "info");
+      const anchors = anchorManifest ?? (await loadAnchorManifest(path)) ?? (await writeAnchorManifest(path));
+      const previewState = preview
+        ? previewManifest("running", { url: preview.url, pid: preview.pid, statusCode: preview.statusCode })
+        : null;
+      const verifyResult =
+        manualVerifyResult ??
+        ({
+          success: false,
+          code: null,
+          stdout: "Verification not requested.",
+          stderr: "",
+        } satisfies CommandResult);
+
+      const handoffPath = await createHandoff(
+        path,
+        latestRun?.request ?? "Manual DesignForge handoff",
+        0,
+        verifyResult,
+        previewState,
+        manualScreenshotInfo,
+        manualConsoleInfo,
+        anchors,
+        manualCritique,
+      );
+      setStep("handoff", "done");
+
+      setStep("export", "active");
+      const exportPath = await exportHandoff(path);
+      setManualExportPath(exportPath);
+      setStep("export", "done");
+      await refreshFiles(path);
+      await appendChatMessage(path, "assistant", `핸드오프 ${handoffPath}와 export 패키지를 생성했습니다.`, "tool", "success");
+    } catch (error) {
+      const message = textFromError(error);
+      setStep("handoff", "error");
+      setStep("export", "error");
+      pushLog("error", message);
+      if (workspacePath) await appendChatMessage(workspacePath, "assistant", `export 생성 중단: ${message}`, "tool", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runChat() {
-    const request = input.trim();
+    await runDesignRequest(input);
+  }
+
+  async function runDesignRequest(rawRequest: string, options: RunRequestOptions = {}) {
+    const request = rawRequest.trim();
     if (!request || busy) return;
 
     setInput("");
     setBusy(true);
     setSteps(START_STEPS);
-    pushMessage("user", request);
+    setManualVerifyResult(null);
+    setManualConsoleInfo(null);
+    setManualScreenshotInfo(null);
+    setManualCritique(null);
+    setManualExportPath("");
+    const displayRequest = options.displayRequest ?? request;
+    const commentNote = options.commentNote ?? displayRequest;
+    const commentAnchorId = options.anchorId ?? anchorFromRequest(request);
+    const commentScreenLabel = options.screenLabel ?? "Generated Screen";
+
     const startedAt = new Date().toISOString();
     let path = "";
     let lastResult: CommandResult | null = null;
     let repairAttempts = 0;
-    let currentPreview: PreviewManifest | null = null;
-    let screenshot: ScreenshotInfo | null = null;
-    let consoleInfo: ConsoleInfo | null = null;
     let anchors: AnchorManifest | null = null;
-    let critique: CritiqueManifest | null = null;
 
     try {
       setStep("context", "active");
       path = await ensureWorkspace();
+      await ensurePreviewSelectionBridge(path);
       await refreshFiles(path);
       await loadRunHistory(path);
+      await loadCodexSession(path);
+      await loadAnchorManifest(path);
+      await loadChatHistory(path);
+      await appendChatMessage(path, "user", displayRequest);
+      await appendChatMessage(path, "assistant", "워크스페이스와 이전 DesignForge 대화를 연결했습니다.", "status", "info");
       setStep("context", "done");
 
       setStep("design", "active");
+      await appendChatMessage(path, "assistant", "DESIGN.md 기준을 확인하고 필요한 경우만 초기화합니다.", "status", "info");
       await seedDesignSystem(path, request);
       setStep("design", "done");
 
       setStep("prompt", "active");
       const prompt = await writePrompt(path, request);
+      await appendChatMessage(path, "assistant", `${PROMPT_PATH}에 Codex 전달 프롬프트를 준비했습니다.`, "tool", "success");
       setStep("prompt", "done");
 
       setStep("codex", "active");
+      await appendChatMessage(path, "assistant", "Codex CLI에 변경 요청을 전달합니다.", "status", "info");
       const check = await callTauri<CommandResult>("check_codex", { codexPath: settings.codexPath });
       pushCommandResult("Codex check", check);
       if (!check.success) throw new Error("Codex CLI is not available.");
@@ -786,198 +1371,23 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
 
       setStep("artifact", "active");
       await refreshFiles(path);
-      setStep("artifact", "done");
-
-      setStep("verify", "active");
-      let verifyResult = await verifyWorkspace(path);
-      if (!verifyResult.success) {
-        setStep("verify", "error");
-        setStep("repair", "active");
-        repairAttempts = 1;
-        const repairPrompt = await writeRepairPrompt(path, request, verifyResult);
-        lastResult = await runCodexPrompt(path, repairPrompt, "Codex repair");
-        setStep("repair", "done");
-
-        setStep("verify", "active");
-        verifyResult = await verifyWorkspace(path);
-      }
-      if (!verifyResult.success) throw new Error("Workspace verification failed after repair.");
-      setStep("verify", "done");
-
-      setStep("preview", "active");
-      try {
-        const info = await startPreview(path);
-        currentPreview = previewManifest("running", { url: info.url, pid: info.pid, statusCode: info.statusCode });
-        setStep("preview", "done");
-      } catch (error) {
-        setStep("preview", "error");
-        currentPreview = previewManifest("error", { error: textFromError(error) });
-        await savePreviewManifest(path, currentPreview);
-        pushLog("error", `Preview unavailable: ${textFromError(error)}`);
-      }
-
-      setStep("screenshot", "active");
-      if (currentPreview?.url) {
-        try {
-          screenshot = await captureScreenshot(path, currentPreview.url);
-          setStep("screenshot", "done");
-        } catch (error) {
-          setStep("screenshot", "error");
-          pushLog("error", `Screenshot unavailable: ${textFromError(error)}`);
-        }
-      } else {
-        setStep("screenshot", "error");
-      }
-
-      setStep("console", "active");
-      if (currentPreview?.url) {
-        try {
-          consoleInfo = await captureConsole(path, currentPreview.url);
-          setStep("console", "done");
-        } catch (error) {
-          setStep("console", "error");
-          pushLog("error", `Console capture unavailable: ${textFromError(error)}`);
-        }
-      } else {
-        setStep("console", "error");
-      }
-
-      setStep("critique", "active");
-      critique = await writeCritiquePrompt(path, request, screenshot, consoleInfo);
-      if (screenshot) {
-        const snapshot = await snapshotGeneratedFiles(path);
-        let critiqueApplied = false;
-
-        try {
-          const critiquePrompt = await callTauri<string>("read_file", {
-            workspacePath: path,
-            relativePath: CRITIQUE_PROMPT_PATH,
-          });
-          lastResult = await runCodexPrompt(path, critiquePrompt, "Codex critique");
-
-          setStep("verify", "active");
-          const critiqueVerifyResult = await verifyWorkspace(path);
-          if (!critiqueVerifyResult.success) {
-            setStep("verify", "error");
-            throw new Error("Critique pass broke workspace verification.");
-          }
-          verifyResult = critiqueVerifyResult;
-          setStep("verify", "done");
-
-          critique = { ...critique, status: "applied", updatedAt: new Date().toISOString() };
-          await saveCritiqueManifest(path, critique);
-          critiqueApplied = true;
-        } catch (error) {
-          await restoreGeneratedFiles(path, snapshot);
-          setStep("verify", "done");
-          critique = {
-            ...critique,
-            status: "failed",
-            updatedAt: new Date().toISOString(),
-            error: textFromError(error),
-          };
-          await saveCritiqueManifest(path, critique);
-          pushLog("error", `Critique skipped after rollback: ${textFromError(error)}`);
-        }
-
-        if (critiqueApplied) {
-          setStep("preview", "active");
-          try {
-            const info = await startPreview(path);
-            currentPreview = previewManifest("running", { url: info.url, pid: info.pid, statusCode: info.statusCode });
-            setStep("preview", "done");
-          } catch (error) {
-            setStep("preview", "error");
-            currentPreview = previewManifest("error", { error: textFromError(error) });
-            await savePreviewManifest(path, currentPreview);
-            pushLog("error", `Preview unavailable after critique: ${textFromError(error)}`);
-          }
-
-          setStep("console", "active");
-          if (currentPreview?.url) {
-            try {
-              consoleInfo = await captureConsole(path, currentPreview.url);
-              critique = {
-                ...critique,
-                consolePath: consoleInfo.relativePath,
-                updatedAt: new Date().toISOString(),
-              };
-              await saveCritiqueManifest(path, critique);
-              setStep("console", "done");
-            } catch (error) {
-              setStep("console", "error");
-              pushLog("error", `Console capture unavailable after critique: ${textFromError(error)}`);
-            }
-          } else {
-            setStep("console", "error");
-          }
-
-          setStep("screenshot", "active");
-          if (currentPreview?.url) {
-            try {
-              screenshot = await captureScreenshot(path, currentPreview.url);
-              critique = {
-                ...critique,
-                screenshotPath: screenshot.relativePath,
-                updatedAt: new Date().toISOString(),
-              };
-              await saveCritiqueManifest(path, critique);
-              setStep("screenshot", "done");
-            } catch (error) {
-              setStep("screenshot", "error");
-              pushLog("error", `Screenshot unavailable after critique: ${textFromError(error)}`);
-            }
-          } else {
-            setStep("screenshot", "error");
-          }
-        }
-      }
-      setStep("critique", critique.status === "failed" ? "error" : "done");
-
       anchors = await writeAnchorManifest(path);
-
-      setStep("handoff", "active");
-      const handoffPath = await createHandoff(
-        path,
-        request,
-        repairAttempts,
-        verifyResult,
-        currentPreview,
-        screenshot,
-        consoleInfo,
-        anchors,
-        critique,
-      );
-      setStep("handoff", "done");
-
-      setStep("export", "active");
-      const exportPath = await exportHandoff(path);
-      setStep("export", "done");
-      await refreshFiles(path);
+      setStep("artifact", "done");
 
       const runId = crypto.randomUUID();
       await recordRun(path, {
         id: runId,
-        request,
+        request: displayRequest,
         status: "success",
         startedAt,
         finishedAt: new Date().toISOString(),
         promptPath: PROMPT_PATH,
         artifactPath: ARTIFACT_PATH,
-        handoffPath,
-        exportPath,
-        screenshotPath: screenshot?.relativePath,
-        consolePath: consoleInfo?.relativePath,
-        consoleErrorCount: consoleInfo?.errorCount,
-        consoleWarningCount: consoleInfo?.warningCount,
         anchorManifestPath: ANCHORS_PATH,
         anchorCount: anchors.anchors.length,
-        critiqueStatus: critique.status,
-        critiquePromptPath: critique.promptPath,
-        critiqueManifestPath: critique.manifestPath,
-        previewUrl: currentPreview?.url,
-        previewStatus: currentPreview?.status,
         codexExitCode: lastResult?.code ?? result.code,
+        codexSessionId: (lastResult ?? result).sessionId ?? codexSession?.sessionId,
+        codexUsedResume: (lastResult ?? result).usedResume,
         stdoutPreview: (lastResult ?? result).stdout.trim().slice(0, 1000),
         stderrPreview: (lastResult ?? result).stderr.trim().slice(0, 1000),
         repairAttempts,
@@ -985,17 +1395,20 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       await appendComment(path, {
         id: crypto.randomUUID(),
         artifactPath: ARTIFACT_PATH,
-        screenLabel: "Generated Screen",
-        note: request,
+        screenLabel: commentScreenLabel,
+        note: commentNote,
         source: "chat",
-        anchorId: anchorFromRequest(request),
+        anchorId: commentAnchorId,
         status: "applied",
         createdAt: new Date().toISOString(),
         runId,
       });
-      pushMessage(
+      await appendChatMessage(
+        path,
         "assistant",
-        `완료했습니다. 디자인 시스템은 DESIGN.md에 정리했고, 생성 화면은 ${ARTIFACT_PATH}에 반영했습니다.`,
+        `기본 생성이 완료됐습니다. ${ARTIFACT_PATH}와 ${ANCHORS_PATH}를 갱신했고, 검증/프리뷰/캡처/크리틱/export는 오른쪽 작업 버튼에서 필요할 때 실행합니다.`,
+        "summary",
+        "success",
       );
     } catch (error) {
       const message = textFromError(error);
@@ -1007,21 +1420,17 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         const runId = crypto.randomUUID();
         await recordRun(path, {
           id: runId,
-          request,
+          request: displayRequest,
           status: "error",
           startedAt,
           finishedAt: new Date().toISOString(),
           promptPath: PROMPT_PATH,
           artifactPath: ARTIFACT_PATH,
-          consolePath: consoleInfo?.relativePath,
-          consoleErrorCount: consoleInfo?.errorCount,
-          consoleWarningCount: consoleInfo?.warningCount,
           anchorManifestPath: anchors ? ANCHORS_PATH : undefined,
           anchorCount: anchors?.anchors.length,
-          critiqueStatus: critique?.status,
-          critiquePromptPath: critique?.promptPath,
-          critiqueManifestPath: critique?.manifestPath,
           codexExitCode: lastResult?.code ?? null,
+          codexSessionId: lastResult?.sessionId ?? codexSession?.sessionId,
+          codexUsedResume: lastResult?.usedResume,
           stdoutPreview: lastResult?.stdout.trim().slice(0, 1000) ?? "",
           stderrPreview: lastResult?.stderr.trim().slice(0, 1000) ?? "",
           repairAttempts,
@@ -1030,88 +1439,190 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         await appendComment(path, {
           id: crypto.randomUUID(),
           artifactPath: ARTIFACT_PATH,
-          screenLabel: "Generated Screen",
-          note: request,
+          screenLabel: commentScreenLabel,
+          note: commentNote,
           source: "chat",
-          anchorId: anchorFromRequest(request),
+          anchorId: commentAnchorId,
           status: "pending",
           createdAt: new Date().toISOString(),
           runId,
         });
       }
-      pushMessage("assistant", `중단됐습니다: ${message}`);
+      if (path) {
+        await appendChatMessage(path, "assistant", `중단됐습니다: ${message}`, "summary", "error");
+      } else {
+        pushMessage("assistant", `중단됐습니다: ${message}`, "summary", "error");
+      }
     } finally {
       setBusy(false);
     }
   }
 
+  async function runComponentEdit() {
+    const note = componentEdit.trim();
+    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+    if (!anchorId || !note || busy) return;
+
+    const anchor = anchorManifest?.anchors.find((item) => item.id === anchorId);
+    const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+    const request = buildTargetedComponentRequest(anchorId, screenLabel, note, previewSelection);
+    await runDesignRequest(request, {
+      displayRequest: `@${anchorId} ${note}`,
+      commentNote: note,
+      anchorId,
+      screenLabel,
+    });
+    setComponentEdit("");
+  }
+
   const latestRun = runHistory[0];
+  const anchors = anchorManifest?.anchors ?? [];
+  const selectedAnchor = anchors.find((anchor) => anchor.id === selectedAnchorId);
+  const selectedAnchorLabel = selectedAnchorId || "선택 없음";
+  const codexSessionLabel = codexSession?.sessionId ? shortSessionId(codexSession.sessionId) : "fresh";
   const visibleArtifacts = visibleFiles.length ? visibleFiles : [{ relativePath: ARTIFACT_PATH, isDirectory: false }];
+  const verifyStepStatus = steps.find((step) => step.id === "verify")?.status ?? "idle";
+  const consolePath = manualConsoleInfo?.relativePath ?? latestRun?.consolePath;
+  const consoleErrors = manualConsoleInfo?.errorCount ?? latestRun?.consoleErrorCount;
+  const consoleWarnings = manualConsoleInfo?.warningCount ?? latestRun?.consoleWarningCount;
+  const screenshotPath = manualScreenshotInfo?.relativePath ?? latestRun?.screenshotPath;
+  const exportReadyPath = manualExportPath || latestRun?.exportPath || "";
+  const critiqueStatus = manualCritique?.status ?? latestRun?.critiqueStatus;
+  const visibleLogs = showAllLogs ? logs : logs.slice(-8);
   const verificationRows: Array<{ name: string; value: string; tone: "lime" | "cyan" | "amber" | "danger" | "steel" }> = [
     {
       name: "TypeScript/Vite",
-      value: latestRun?.status === "success" ? "통과" : latestRun?.status === "error" ? "실패" : busy ? "진행 중" : "대기",
-      tone: latestRun?.status === "success" ? "lime" : latestRun?.status === "error" ? "danger" : busy ? "cyan" : "steel",
+      value: manualVerifyResult
+        ? manualVerifyResult.success
+          ? "통과"
+          : "실패"
+        : verifyStepStatus === "active"
+          ? "진행 중"
+          : "요청 대기",
+      tone: manualVerifyResult
+        ? manualVerifyResult.success
+          ? "lime"
+          : "danger"
+        : verifyStepStatus === "active"
+          ? "cyan"
+          : "steel",
     },
     {
       name: "콘솔",
-      value: latestRun?.consolePath
-        ? `${latestRun.consoleErrorCount ?? 0} errors / ${latestRun.consoleWarningCount ?? 0} warnings`
-        : "대기",
+      value: consolePath ? `${consoleErrors ?? 0} errors / ${consoleWarnings ?? 0} warnings` : "요청 대기",
       tone:
-        latestRun?.consolePath && (latestRun.consoleErrorCount ?? 0) === 0 && (latestRun.consoleWarningCount ?? 0) === 0
+        consolePath && (consoleErrors ?? 0) === 0 && (consoleWarnings ?? 0) === 0
           ? "lime"
-          : latestRun?.consolePath
+          : consolePath
             ? "amber"
             : "steel",
     },
     {
       name: "스크린샷",
-      value: latestRun?.screenshotPath ? "캡처됨" : "대기",
-      tone: latestRun?.screenshotPath ? "lime" : "steel",
+      value: screenshotPath ? "캡처됨" : "요청 대기",
+      tone: screenshotPath ? "lime" : "steel",
     },
   ];
 
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="grid h-screen min-w-[1180px] grid-cols-[300px_minmax(520px,1fr)_360px] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+      className="grid h-screen min-w-[1180px] grid-cols-[320px_minmax(560px,1fr)_360px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
     >
       <aside
         data-comment-anchor="navigation"
-        className="flex min-h-0 flex-col border-r border-[var(--line)] bg-[var(--panel)] px-5 py-5"
+        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--panel)] px-5 py-5"
       >
         <header className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-lime-200/80">local codex studio</p>
-            <h1 className="mt-1 font-serif text-3xl tracking-normal text-[var(--ink-strong)]">DesignForge</h1>
-            <p className="mt-2 truncate text-xs text-[var(--muted)]" title={workspacePath || DEFAULT_WORKSPACE}>
-              {truncatePath(workspacePath || DEFAULT_WORKSPACE)}
-            </p>
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--line-strong)] bg-white">
+              <span className="font-mono text-sm font-medium text-[var(--ink)]">DF</span>
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-medium tracking-normal text-[var(--ink-strong)]">DesignForge</h1>
+              <p className="mt-1 truncate font-mono text-xs text-[var(--muted)]" title={workspacePath || DEFAULT_WORKSPACE}>
+                {truncatePath(workspacePath || DEFAULT_WORKSPACE)}
+              </p>
+            </div>
           </div>
-          <Badge tone="lime">로컬</Badge>
+          <Badge tone={codexSession ? "lime" : "cyan"}>{codexSession ? `session ${codexSessionLabel}` : "Codex ready"}</Badge>
         </header>
 
-        <nav className="mt-7 grid gap-1 text-sm text-zinc-300" aria-label="작업 보기">
-          {["작업대", "생성 기록", "디자인 시스템", "검증 로그"].map((item, index) => (
+        <nav className="mt-7 grid gap-1 text-sm text-[var(--charcoal)]" aria-label="작업 보기">
+          {NAV_ITEMS.map((item) => (
             <button
-              key={item}
+              key={item.key}
               type="button"
+              onClick={() => activateNav(item)}
+              aria-current={activeNav === item.key ? "page" : undefined}
               className={cn(
-                "flex min-h-10 items-center justify-between rounded-md px-3 text-left transition focus:outline-none focus:ring-2 focus:ring-cyan-300/70",
-                index === 0 ? "bg-[var(--panel-3)] text-[var(--ink-strong)]" : "hover:bg-[var(--panel-2)]",
+                "flex min-h-10 items-center justify-between rounded-full px-4 text-left transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                activeNav === item.key
+                  ? "border border-[var(--line)] bg-[var(--panel-2)] text-[var(--ink-strong)]"
+                  : "hover:bg-[var(--panel-2)]",
               )}
             >
-              <span>{item}</span>
-              {index === 0 ? <span className="h-1.5 w-1.5 rounded-full bg-lime-300" /> : null}
+              <span>{item.label}</span>
+              {activeNav === item.key ? <span className="h-1.5 w-1.5 rounded-full bg-black" /> : null}
             </button>
           ))}
         </nav>
 
-        <section data-comment-anchor="chat-request" className="mt-auto pt-6">
+        <div className="mt-4 flex items-center gap-2">
+          <Button
+            variant="secondary"
+            className="min-h-9 flex-1 px-3 text-xs"
+            onClick={() => void resetCodexSession()}
+            disabled={busy}
+            title="이전 Codex 대화 세션을 끊고 다음 생성은 새 세션으로 시작합니다."
+          >
+            새 디자인 시작
+          </Button>
+          <Badge tone="steel">{codexSession ? "resume on" : "fresh next"}</Badge>
+        </div>
+
+        <section data-comment-anchor="feature-list" className="mt-6 rounded-xl border border-[var(--line)] bg-white">
+          <div className="border-b border-[var(--line)] p-4">
+            <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">design system</p>
+            <h2 className="mt-2 text-xl font-medium tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
+          </div>
+          {[
+            ["Canvas", "paper-white", "#ffffff"],
+            ["Controls", "rounded-full pills", "black / white"],
+            ["Panels", "12px radius", "1px hairline"],
+            ["Artifact", ARTIFACT_PATH, preview ? "live" : "ready"],
+          ].map(([name, value, note]) => (
+            <div
+              key={name}
+              className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3 last:border-b-0"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--ink)]">{name}</p>
+                <p className="truncate font-mono text-xs text-[var(--muted)]">{value}</p>
+              </div>
+              <span className="shrink-0 text-right text-xs text-[var(--muted)]">{note}</span>
+            </div>
+          ))}
+        </section>
+
+        <section data-comment-anchor="agent-chat" className="mt-5 shrink-0">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[var(--ink-strong)]">작업 대화</h2>
+            <Badge tone="steel">{messages.length}개</Badge>
+          </div>
+          <div className="max-h-40 overflow-auto rounded-xl border border-[var(--line)] bg-white p-3">
+            <div className="grid gap-2">
+              {messages.slice(-24).map((message) => (
+                <ChatRow key={message.id} message={message} />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section data-comment-anchor="hero" className="mt-5 shrink-0 border-t border-[var(--line)] pt-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[var(--ink-strong)]">요청 입력</h2>
-            <Badge tone="cyan">대화형</Badge>
+            <Badge tone="steel">ko-first</Badge>
           </div>
           <div className="grid gap-3">
             <label className="sr-only" htmlFor="designforge-request">
@@ -1124,8 +1635,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
               }}
-              className="min-h-36 w-full resize-none rounded-md border border-[var(--line-strong)] bg-[#101210] p-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/30"
-              placeholder="만들고 싶은 프론트엔드 디자인을 그대로 입력하세요."
+              className="min-h-32 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+              placeholder="DesignForge에게 만들고 싶은 화면이나 수정할 컴포넌트를 입력하세요."
               disabled={busy}
             />
             <div data-comment-anchor="primary-action" className="flex gap-2">
@@ -1144,10 +1655,10 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
             </div>
           </div>
 
-          <div className="mt-5 grid gap-2 text-xs text-zinc-400">
-            <p className="font-medium text-zinc-300">최근 요청</p>
+          <div className="mt-5 grid gap-2 text-xs text-[var(--muted)]">
+            <p className="font-medium text-[var(--ink)]">최근 요청</p>
             {runHistory.length === 0 && (
-              <div className="rounded border border-[var(--line)] px-3 py-2 leading-5 text-[var(--muted)]">
+              <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 leading-5 text-[var(--muted)]">
                 첫 실행 후 최근 요청이 여기에 쌓입니다.
               </div>
             )}
@@ -1156,7 +1667,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
                 key={run.id}
                 type="button"
                 onClick={() => setInput(run.request)}
-                className="line-clamp-2 rounded border border-[var(--line)] px-3 py-2 text-left leading-5 hover:bg-[var(--panel-2)] focus:outline-none focus:ring-2 focus:ring-cyan-300/70"
+                className="line-clamp-2 rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-left leading-5 hover:bg-[var(--panel-2)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
               >
                 {run.request}
               </button>
@@ -1166,9 +1677,12 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       </aside>
 
       <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-[var(--canvas)]">
-        <div className="flex min-h-14 items-center justify-between border-b border-[var(--line)] px-5">
+        <div className="flex min-h-16 items-center justify-between border-b border-[var(--line)] px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <h2 className="truncate text-sm font-semibold text-[var(--ink-strong)]">생성 디자인 캔버스</h2>
+            <div>
+              <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">live artifact canvas</p>
+              <h2 className="truncate text-2xl font-medium tracking-normal text-[var(--ink-strong)]">생성 화면 미리보기</h2>
+            </div>
             <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
           </div>
           <div className="flex items-center gap-2">
@@ -1176,7 +1690,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
               variant="ghost"
               className="min-h-9 px-3 text-xs"
               onClick={() => void startPreviewSafely()}
-              disabled={!workspacePath}
+              disabled={busy || !workspacePath}
             >
               <Play size={14} />
               시작
@@ -1185,80 +1699,96 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
               <Square size={14} />
               중지
             </Button>
-            <span className="rounded-md border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">100%</span>
+            <Button
+              variant={selectionMode ? "primary" : "ghost"}
+              className="min-h-9 px-3 text-xs"
+              onClick={() => setSelectionMode((current) => !current)}
+              disabled={!preview}
+              title="미리보기에서 data-comment-anchor 영역을 클릭해 수정 대상을 선택합니다."
+            >
+              <MousePointer2 size={14} />
+              선택 수정
+            </Button>
+            <span className="rounded-full border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">100%</span>
           </div>
         </div>
 
-        <section className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-stone-400/45 bg-[#e9e0ce] shadow-2xl shadow-black/35">
-            <div className="flex min-h-10 items-center justify-between border-b border-stone-300 bg-[#f6efe2] px-4 text-xs text-stone-600">
+        <section className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] p-5">
+          <div className="mx-auto flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[var(--line-strong)] bg-white">
+            <div className="flex min-h-12 items-center justify-between border-b border-[var(--line)] bg-white px-4 text-xs text-[var(--muted)]">
               <span className="truncate font-mono">{ARTIFACT_PATH}</span>
               <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비"}</span>
             </div>
             {preview ? (
-              <iframe title="Workspace preview" src={preview.url} className="h-[min(70vh,720px)] w-full bg-white" />
+              <iframe
+                title="Workspace preview"
+                src={previewFrameSrc(preview.url, selectionMode)}
+                className={cn(
+                  "h-[min(70vh,720px)] w-full bg-white",
+                  selectionMode && "ring-4 ring-[var(--focus-ring)]",
+                )}
+              />
             ) : (
-              <div className="grid min-h-[560px] grid-cols-[210px_1fr] bg-[#ece3d1] text-stone-950">
-                <div className="border-r border-stone-300 bg-[#d8d0c1] p-4">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-stone-600">DesignForge</p>
-                  <div className="mt-6 grid gap-2">
-                    {["브리프", "시스템", "화면", "검증"].map((item, index) => (
-                      <div
-                        key={item}
-                        className={cn(
-                          "rounded px-3 py-2 text-sm",
-                          index === 1 ? "bg-stone-950 text-lime-100" : "bg-stone-200",
-                        )}
-                      >
-                        {item}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="min-w-0 p-6">
-                  <div className="flex items-start justify-between gap-5">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-cyan-800">현재 산출물</p>
-                      <h3 className="mt-2 max-w-xl break-keep font-serif text-3xl leading-tight tracking-normal">
-                        반복 생성에 맞춘 실제 작업 화면
-                      </h3>
-                    </div>
-                    <span className="shrink-0 rounded bg-lime-200 px-3 py-1 text-xs font-bold text-stone-950">
-                      {latestRun?.status === "success" ? "검토 가능" : busy ? "작성 중" : "대기"}
-                    </span>
-                  </div>
-                  <div className="mt-8 grid grid-cols-3 gap-4">
-                    {[
-                      { title: "디자인 시스템", detail: "DESIGN.md에서 방향을 먼저 고정합니다." },
-                      { title: "React 화면", detail: "생성 화면은 한 파일 중심으로 관리합니다." },
-                      { title: "검증 리포트", detail: "빌드, 콘솔, 스크린샷을 한 흐름으로 봅니다." },
-                    ].map((item) => (
-                      <div key={item.title} className="min-h-28 rounded-md border border-stone-300 bg-[#f8f1e5] p-4">
-                        <p className="text-sm font-bold">{item.title}</p>
-                        <p className="mt-3 break-keep text-xs leading-5 text-stone-600">{item.detail}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-6 min-h-40 rounded-md border border-stone-300 bg-stone-950 p-4 text-lime-100">
-                    <div className="flex items-center justify-between gap-4 text-xs">
-                      <span>verification console</span>
-                      <span>
-                        {latestRun?.consolePath
-                          ? `${latestRun.consoleErrorCount ?? 0} errors`
-                          : busy
-                            ? "running"
-                            : "waiting"}
+              <div className="min-h-[560px] bg-[var(--panel-2)] p-5 text-[var(--ink)]">
+                <div className="rounded-xl border border-[var(--line)] bg-white">
+                  <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-black" />
+                      <span className="truncate font-mono text-xs text-[var(--charcoal)]">
+                        artifact://designforge-workbench
                       </span>
                     </div>
-                    <div className="mt-7 grid gap-3 font-mono text-sm text-cyan-100">
-                      {messages.slice(-3).map((message) => (
-                        <p key={message.id} className="line-clamp-2">
-                          {message.role === "user" ? "> " : "$ "}
-                          {message.content}
+                    <Badge tone="steel">anchors visible</Badge>
+                  </div>
+                  <div className="grid gap-4 p-4 lg:grid-cols-[1fr_220px]">
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-[var(--line)] bg-white p-5">
+                        <p className="font-mono text-xs text-[var(--muted)]">composer</p>
+                        <h3 className="mt-3 max-w-2xl break-keep text-3xl font-medium leading-tight tracking-normal text-[var(--ink-strong)]">
+                          요청에서 검증까지 한 화면에서 이어지는 DesignForge
+                        </h3>
+                        <p className="mt-4 max-w-2xl text-sm leading-6 text-[var(--muted)]">
+                          사용자는 한국어로 변경 의도를 남기고, 시스템은 디자인 기준과 컴포넌트 앵커를 보존한 채 React/Tailwind 산출물을 갱신합니다.
                         </p>
-                      ))}
-                      {busy && <p>codex exec · generating workspace artifact...</p>}
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          <Badge tone="cyan">run codex design</Badge>
+                          <Badge tone="lime">{latestRun?.status === "success" ? "검토 가능" : busy ? "작성 중" : "대기"}</Badge>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {["요청 해석", "시스템 갱신", "빌드 확인"].map((item, index) => (
+                          <div key={item} className="rounded-xl border border-[var(--line)] bg-white p-4">
+                            <p className="font-mono text-xs text-[var(--mute)]">0{index + 1}</p>
+                            <p className="mt-5 text-sm font-medium text-[var(--ink)]">{item}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+
+                    <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                      <p className="font-mono text-xs text-[var(--muted)]">outline</p>
+                      <div className="mt-4 space-y-2">
+                        {(anchors.length ? anchors : [{ id: "navigation", line: 0 } as AnchorInfo]).slice(0, 8).map((anchor) => (
+                          <div
+                            key={anchor.id}
+                            className="flex items-center justify-between gap-2 border-b border-[var(--line)] pb-2 last:border-b-0"
+                          >
+                            <code className="text-xs text-[var(--ink)]">{anchor.id}</code>
+                            <span className="text-xs text-[var(--muted)]">{anchor.line ? `L${anchor.line}` : "ready"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-t border-[var(--line)] bg-[var(--surface-dark)] p-5 font-mono text-sm leading-7 text-white">
+                    {messages.slice(-3).map((message) => (
+                      <p key={message.id} className="line-clamp-2">
+                        {message.role === "user" ? "> " : "$ "}
+                        {message.content}
+                      </p>
+                      ))}
+                    {busy && <p>codex exec · generating workspace artifact...</p>}
                   </div>
                 </div>
               </div>
@@ -1272,19 +1802,105 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         className="flex min-h-0 flex-col overflow-y-auto border-l border-[var(--line)] bg-[var(--panel-dark)] px-5 py-5"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-[var(--ink-strong)]">자동 파이프라인</h2>
+          <h2 className="text-sm font-semibold text-[var(--ink-strong)]">작업 파이프라인</h2>
           <Badge tone={busy ? "cyan" : latestRun?.status === "error" ? "danger" : latestRun?.status === "success" ? "lime" : "steel"}>
-            {busy ? "실행 중" : latestRun?.status === "success" ? "완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
+            {busy ? "실행 중" : latestRun?.status === "success" ? "생성 완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
           </Badge>
         </div>
 
+        <section data-comment-anchor="component-edit" className="mt-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-[var(--ink-strong)]">컴포넌트 직접 수정</h3>
+            <Badge tone={selectedAnchorId ? "lime" : selectionMode ? "cyan" : "steel"}>{selectedAnchorLabel}</Badge>
+          </div>
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3">
+            <div className="flex items-start gap-2 text-xs leading-5 text-[var(--muted)]">
+              <MousePointer2 size={15} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+              <p>
+                미리보기에서 <span className="text-[var(--ink)]">선택 수정</span>을 켠 뒤 영역을 클릭하거나, 아래 앵커를 선택해 해당 컴포넌트만 좁게 수정합니다.
+              </p>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <Button
+                variant={selectionMode ? "primary" : "secondary"}
+                className="min-h-9 flex-1 px-3 text-xs"
+                onClick={() => setSelectionMode((current) => !current)}
+                disabled={!preview}
+              >
+                <MousePointer2 size={14} />
+                {selectionMode ? "선택 중" : "클릭 선택"}
+              </Button>
+              <Button
+                variant="secondary"
+                className="min-h-9 px-3 text-xs"
+                onClick={() => (workspacePath ? void loadAnchorManifest(workspacePath) : undefined)}
+                disabled={!workspacePath}
+              >
+                새로고침
+              </Button>
+            </div>
+
+            <div className="mt-3 grid max-h-28 gap-1 overflow-auto">
+              {anchors.length === 0 && <p className="text-xs leading-5 text-[var(--muted)]">아직 색인된 앵커가 없습니다. 생성 후 자동으로 채워집니다.</p>}
+              {anchors.map((anchor) => (
+                <button
+                  key={anchor.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedAnchorId(anchor.id);
+                    setPreviewSelection(null);
+                  }}
+                  className={cn(
+                    "flex min-h-8 items-center justify-between gap-2 rounded-full px-3 text-left text-xs transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                    selectedAnchorId === anchor.id ? "bg-black text-white" : "text-[var(--charcoal)] hover:bg-white",
+                  )}
+                >
+                  <span className="truncate">@{anchor.id}</span>
+                  <span className="shrink-0 font-mono text-[10px] opacity-70">L{anchor.line}</span>
+                </button>
+              ))}
+            </div>
+
+            {selectedAnchor || previewSelection ? (
+              <div className="mt-3 rounded-xl border border-[var(--line)] bg-white p-3 text-[11px] leading-5 text-[var(--muted)]">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
+                  <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
+                </div>
+                {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+              </div>
+            ) : null}
+
+            <label className="mt-3 block text-xs font-medium text-[var(--ink)]" htmlFor="component-edit">
+              선택 영역 수정 내용
+            </label>
+            <textarea
+              id="component-edit"
+              value={componentEdit}
+              onChange={(event) => setComponentEdit(event.target.value)}
+              className="mt-2 min-h-24 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-white p-3 text-xs leading-5 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+              placeholder="예: hero 문구만 더 짧게, CTA 색만 accent로 변경"
+              disabled={busy}
+            />
+            <Button
+              variant="primary"
+              className="mt-3 w-full"
+              onClick={() => void runComponentEdit()}
+              disabled={busy || !selectedAnchorId || !componentEdit.trim()}
+            >
+              선택 영역만 수정
+            </Button>
+          </div>
+        </section>
+
         <section className="mt-5 grid gap-3" aria-label="파이프라인 단계">
           {steps.map((step) => (
-            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 border-b border-zinc-800 pb-3">
+            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 border-b border-[var(--line)] pb-3">
               <StepIcon status={step.status} />
               <div className="min-w-0">
-                <p className="text-sm font-medium text-zinc-100">{step.label}</p>
-                <p className="mt-1 truncate text-xs text-zinc-500">{step.detail}</p>
+                <p className="text-sm font-medium text-[var(--ink)]">{step.label}</p>
+                <p className="mt-1 truncate text-xs text-[var(--muted)]">{step.detail}</p>
               </div>
               <Badge tone={stepTone(step.status)}>{stepLabel(step.status)}</Badge>
             </div>
@@ -1294,31 +1910,64 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         <section data-comment-anchor="artifact-list" className="mt-7">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-[var(--ink-strong)]">아티팩트</h3>
-            <span className="text-xs text-zinc-500">{visibleArtifacts.length}개</span>
+            <span className="text-xs text-[var(--muted)]">{visibleArtifacts.length}개</span>
           </div>
           <div className="grid gap-2">
             {visibleArtifacts.slice(0, 8).map((file) => (
-              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-md border border-[var(--line)] bg-[var(--panel-2)] px-3 py-3">
+              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-3">
                 {file.relativePath.endsWith(".md") ? <FileText size={14} /> : <Code2 size={14} />}
-                <span className="truncate font-mono text-xs text-zinc-200">{file.relativePath}</span>
+                <span className="truncate font-mono text-xs text-[var(--ink)]">{file.relativePath}</span>
               </div>
             ))}
           </div>
         </section>
 
         <section data-comment-anchor="verification" className="mt-7">
-          <h3 className="text-sm font-semibold text-[var(--ink-strong)]">검증 결과</h3>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-[var(--ink-strong)]">요청형 검증 작업</h3>
+            {critiqueStatus ? <Badge tone={critiqueStatus === "applied" ? "lime" : critiqueStatus === "failed" ? "danger" : "steel"}>critique {critiqueStatus}</Badge> : null}
+          </div>
           <div className="mt-3 grid gap-2">
             {verificationRows.map((check) => (
-              <div key={check.name} className="flex min-h-9 items-center justify-between gap-3 border-b border-zinc-800 text-sm">
-                <span className="text-zinc-400">{check.name}</span>
+              <div key={check.name} className="flex min-h-9 items-center justify-between gap-3 border-b border-[var(--line)] text-sm">
+                <span className="text-[var(--charcoal)]">{check.name}</span>
                 <Badge tone={check.tone}>{check.value}</Badge>
               </div>
             ))}
           </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualVerify()} disabled={busy || !workspacePath}>
+              <CheckCircle2 size={14} />
+              검증 실행
+            </Button>
+            <Button
+              variant="secondary"
+              className="min-h-9 px-3 text-xs"
+              onClick={() => void runManualRepair()}
+              disabled={busy || !workspacePath || !manualVerifyResult || manualVerifyResult.success}
+            >
+              <XCircle size={14} />
+              검증 수리
+            </Button>
+            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+              <Terminal size={14} />
+              캡처 실행
+            </Button>
+            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+              <Code2 size={14} />
+              크리틱 실행
+            </Button>
+            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+              <FileText size={14} />
+              Export 생성
+            </Button>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
+            기본 생성은 Codex 변경 반영까지만 실행합니다. Node 기반 검증과 Vite preview는 이 버튼을 누를 때만 시작됩니다.
+          </p>
         </section>
 
-        <section className="mt-7">
+        <section data-comment-anchor="run-history" className="mt-7">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
             <History size={16} className="text-[var(--accent)]" />
             생성 기록
@@ -1326,7 +1975,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           <div className="grid gap-2">
             {runHistory.length === 0 && <div className="text-xs text-[var(--muted)]">기록된 실행이 없습니다.</div>}
             {runHistory.slice(0, 3).map((run) => (
-              <div key={run.id} className="rounded-md border border-[var(--line)] bg-[var(--panel-2)] p-3">
+              <div key={run.id} className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3">
                 <div className="mb-2 flex items-center justify-between gap-2 text-xs">
                   <Badge tone={runTone(run.status)}>
                     {run.status === "success" ? "success" : "error"}
@@ -1335,8 +1984,9 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
                   <span className="text-[var(--muted)]">{new Date(run.finishedAt).toLocaleTimeString()}</span>
                 </div>
                 <div className="line-clamp-2 text-xs leading-5 text-[var(--ink)]">{run.request}</div>
-                {(run.previewStatus || run.exportPath) && (
+                {(run.codexSessionId || run.previewStatus || run.exportPath) && (
                   <div className="mt-2 grid gap-1 text-[11px] leading-4 text-[var(--muted)]">
+                    {run.codexSessionId && <span className="truncate font-mono">codex: {shortSessionId(run.codexSessionId)} {run.codexUsedResume ? "resume" : "fresh"}</span>}
                     {run.previewStatus && <span>preview: {run.previewStatus}</span>}
                     {run.critiqueStatus && <span>critique: {run.critiqueStatus}</span>}
                     {run.screenshotPath && <span className="truncate font-mono">{run.screenshotPath}</span>}
@@ -1348,69 +1998,108 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
           </div>
         </section>
 
-        <section data-comment-anchor="export" className="mt-7 border-t border-zinc-800 pt-5">
+        <section data-comment-anchor="export" className="mt-7 border-t border-[var(--line)] pt-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-[var(--ink-strong)]">핸드오프 export</h3>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">
+              <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
                 스크린샷, 콘솔 로그, 변경 파일을 묶어 전달합니다.
               </p>
             </div>
-            <Badge tone={latestRun?.exportPath ? "lime" : busy ? "cyan" : "steel"}>
-              {latestRun?.exportPath ? "준비됨" : busy ? "생성 중" : "대기"}
+            <Badge tone={exportReadyPath ? "lime" : busy ? "cyan" : "steel"}>
+              {exportReadyPath ? "준비됨" : busy ? "생성 중" : "대기"}
             </Badge>
           </div>
           <Button
             variant="primary"
             className="mt-4 w-full"
             onClick={() => void revealPath(EXPORT_PATH)}
-            disabled={!workspacePath || !latestRun?.exportPath}
+            disabled={!workspacePath || !exportReadyPath}
           >
             <FolderOpen size={16} />
             export 열기
           </Button>
         </section>
 
-        <section className="mt-7 min-h-48 border-t border-zinc-800 pt-5">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
-            <Terminal size={16} className="text-[var(--accent)]" />
-            시스템 로그
+        <section className="mt-7 min-h-48 border-t border-[var(--line)] pt-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ink-strong)]">
+              <Terminal size={16} className="text-[var(--accent)]" />
+              시스템 로그
+            </div>
+            <Button variant="ghost" className="min-h-8 px-3 text-xs" onClick={() => setShowAllLogs((current) => !current)}>
+              {showAllLogs ? "접기" : "전체 보기"}
+            </Button>
           </div>
           <div className="grid gap-2">
-            {logs.slice(-8).map((log) => (
+            {visibleLogs.map((log) => (
               <LogRow key={log.id} log={log} />
             ))}
           </div>
         </section>
       </aside>
+
+      <footer
+        data-comment-anchor="footer"
+        className="col-span-3 flex min-h-12 items-center justify-between gap-4 border-t border-[var(--line)] bg-white px-5 text-sm text-[var(--muted)]"
+      >
+        <span>DesignForge · local documentation-first workbench</span>
+        <span className="truncate font-mono">
+          DESIGN.md synced · {ARTIFACT_PATH} · {preview ? "preview live" : "preview waiting"}
+        </span>
+      </footer>
+    </div>
+  );
+}
+
+function ChatRow({ message }: { message: ChatMessage }) {
+  const parsedDate = new Date(message.createdAt);
+  const timestamp = Number.isNaN(parsedDate.getTime()) ? message.createdAt : parsedDate.toLocaleTimeString();
+  const isUser = message.role === "user";
+  const levelClass =
+    message.level === "error"
+      ? "border-red-200 bg-red-50 text-red-800"
+      : message.level === "success"
+        ? "border-[var(--line-strong)] bg-white text-[var(--ink)]"
+        : isUser
+          ? "border-black bg-black text-white"
+          : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]";
+
+  return (
+    <div className={cn("rounded-xl border px-3 py-2 text-xs leading-5", levelClass)}>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="font-medium">{isUser ? "user" : message.kind ?? "agent"}</span>
+        <span className={cn("shrink-0 font-mono text-[10px]", isUser ? "text-white/70" : "text-[var(--muted)]")}>{timestamp}</span>
+      </div>
+      <p className="whitespace-pre-wrap break-words">{message.content}</p>
     </div>
   );
 }
 
 function StepIcon({ status }: { status: StepStatus }) {
-  if (status === "done") return <CheckCircle2 size={14} className="mt-0.5 text-lime-300" />;
+  if (status === "done") return <CheckCircle2 size={14} className="mt-0.5 text-[var(--ink)]" />;
   if (status === "error") return <XCircle size={14} className="mt-0.5 text-red-300" />;
-  if (status === "active") return <Loader2 size={14} className="mt-0.5 animate-spin text-cyan-300" />;
-  return <Circle size={14} className="mt-0.5 text-zinc-600" />;
+  if (status === "active") return <Loader2 size={14} className="mt-0.5 animate-spin text-[var(--ink)]" />;
+  return <Circle size={14} className="mt-0.5 text-[var(--mute)]" />;
 }
 
 function LogRow({ log }: { log: LogEvent }) {
   return (
-    <div className="rounded-md border border-[var(--line)] bg-[var(--panel-2)] p-3">
+    <div className="rounded-xl border border-[#2a2a2a] bg-[var(--surface-dark)] p-3 text-white">
       <div className="mb-1 flex items-center justify-between gap-2 text-xs">
         <span
           className={cn(
             "font-medium",
-            log.level === "success" && "text-lime-200",
+            log.level === "success" && "text-white",
             log.level === "error" && "text-red-200",
-            log.level === "info" && "text-[var(--muted)]",
+            log.level === "info" && "text-[var(--on-dark-muted)]",
           )}
         >
           {log.level}
         </span>
-        <span className="text-[var(--muted)]">{log.timestamp}</span>
+        <span className="text-[var(--on-dark-muted)]">{log.timestamp}</span>
       </div>
-      <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[var(--ink)]">
+      <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-white">
         {log.message}
       </pre>
     </div>

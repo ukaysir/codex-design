@@ -3,25 +3,35 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
-  --bg: #111311;
-  --canvas: #20221f;
-  --panel: #171917;
-  --panel-dark: #151715;
-  --panel-2: #1c1f1c;
-  --panel-3: #282a2a;
-  --line: rgba(113, 113, 122, 0.42);
-  --line-strong: rgba(161, 161, 170, 0.56);
-  --ink: #f4efe3;
-  --ink-strong: #fff8e8;
-  --muted: #9ca3af;
-  --primary: #bef264;
-  --primary-strong: #d9f99d;
-  --accent: #67e8f9;
+  color-scheme: light;
+  --bg: #ffffff;
+  --canvas: #ffffff;
+  --panel: #ffffff;
+  --panel-dark: #ffffff;
+  --panel-2: #fafafa;
+  --panel-3: #f5f5f5;
+  --line: #e5e5e5;
+  --line-strong: #d4d4d4;
+  --ink: #090909;
+  --ink-strong: #000000;
+  --charcoal: #525252;
+  --muted: #737373;
+  --mute: #a3a3a3;
+  --primary: #000000;
+  --primary-strong: #171717;
+  --on-primary: #ffffff;
+  --accent: #000000;
+  --focus-ring: rgba(59, 130, 246, 0.5);
+  --surface-dark: #171717;
+  --on-dark: #ffffff;
+  --on-dark-muted: rgba(255, 255, 255, 0.7);
   --warning: #fcd34d;
-  --danger: #fca5a5;
+  --danger: #dc2626;
+  --terminal-red: #ff5f56;
+  --terminal-yellow: #ffbd2e;
+  --terminal-green: #27c93f;
   font-family:
-    "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", ui-sans-serif, system-ui,
+    "SF Pro Rounded", "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", ui-rounded, ui-sans-serif, system-ui,
     -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--ink);
@@ -42,15 +52,17 @@ button,
 input,
 textarea,
 select {
+  color-scheme: light;
   font: inherit;
+  color: inherit;
 }
 
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
 }
 
 textarea {
@@ -63,7 +75,8 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--line);
+  background: var(--line-strong);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-track {

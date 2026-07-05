@@ -12,8 +12,11 @@ const CODEX_DESIGN_PROTOCOL = [
   "This Codex workspace previews React/Tailwind through Vite, so convert Claude Design Component ideas into React/Tailwind rules instead of using DC-only tools.",
   "The host has disabled clarifying questions for normal runs. Proceed from the chat request, infer practical assumptions, and record them in DESIGN.md. Stop only for a true blocker such as missing referenced assets or inaccessible source material.",
   "For targeted edits, change only what was asked. Preserve unrelated layout, spacing, typography, colors, content, screen labels, and comment anchors.",
+  "Treat the current DESIGN.md and generated artifact as the continuing design system. Revise inside that system unless the user explicitly asks for a new direction, reset, or replacement.",
+  "When the request names a data-comment-anchor or includes a mentioned-element block, edit the matching semantic region first. Do not regenerate the whole screen for a component-level change.",
   "For new work, explore AGENTS.md, DESIGN.md, existing generated code, assets, and any relevant local files before editing.",
   "Create or update the design system first: purpose, tone, visual direction, color, typography, spacing, components, motion, accessibility, content rules, and assumptions.",
+  "Keep a durable component map in DESIGN.md: major regions, anchor ids, reusable patterns, and what should remain consistent across future revisions.",
   "If no brand or existing design system exists, commit to a clear aesthetic direction before coding: purpose, tone, differentiation, and the one memorable visual idea.",
   "Avoid AI slop: filler sections, fake metrics, generic SaaS layouts, decorative gradients without purpose, emoji unless the brand uses it, left-border accent cards, and timid evenly-distributed palettes.",
   "Use provided or existing assets when available. Do not invent logos or hand-draw asset replacements when a real asset should exist.",
@@ -44,13 +47,18 @@ Required reading before edits:
 
 Autonomous workflow:
 1. Understand the request and infer missing context without asking the user.
-2. Update ${designSystemPath} first when it is placeholder, thin, stale, or inconsistent.
-3. Commit to a concrete aesthetic direction before editing UI.
-4. Create or update ${artifactPath} as the main generated screen.
-5. Update src/styles.css only when the design needs shared font imports, CSS variables, keyframes, or global reset support.
-6. Keep generated work previewable with the existing Vite React app.
-7. Use stable kebab-case data-comment-anchor values on important regions such as hero, navigation, primary-action, feature-list, pricing, form, preview, and footer.
-8. Summarize changed files, assumptions, and verification performed.
+2. Classify the request before editing:
+   - targeted component edit: mentions @anchor, includes <mentioned-element>, or asks for a small text/style/layout tweak
+   - system revision: asks to evolve the current design direction, components, or content
+   - fresh design: explicitly asks for a new design, reset, replacement, or different direction
+3. For targeted component edits, inspect the matching data-comment-anchor in ${artifactPath}, edit the smallest source region, and preserve all unrelated UI.
+4. For system revisions, update ${designSystemPath} first, then revise ${artifactPath} within the same visual system.
+5. For fresh designs only, replace the screen direction deliberately and record the new system in ${designSystemPath}.
+6. Keep ${designSystemPath} as the durable source of truth, including component inventory, anchor map, tokens, patterns, assumptions, and revision notes.
+7. Update src/styles.css only when the design needs shared font imports, CSS variables, keyframes, or global reset support.
+8. Keep generated work previewable with the existing Vite React app.
+9. Use stable kebab-case data-comment-anchor values on important regions such as hero, navigation, primary-action, feature-list, pricing, form, preview, and footer.
+10. Summarize changed files, assumptions, and verification performed.
 
 User request:
 ${userRequest.trim() || "Create a focused frontend screen."}
@@ -64,6 +72,8 @@ Output contract:
 - Root screen element includes data-screen-label.
 - Important semantic regions include data-comment-anchor attributes.
 - Existing data-comment-anchor attributes are preserved.
+- Targeted edits modify only the selected anchor's semantic region unless the request explicitly broadens scope.
+- Follow the current component inventory and visual system before introducing a new pattern.
 - No filler copy, fake stats, or generic AI SaaS composition.
 - No unrelated shell, dependency, or app-scaffold changes.
 - Prefer a strong, finished first screen over scattered partial files.`;
@@ -108,6 +118,24 @@ Name the one visual or interaction idea the user should remember.
 - Components: buttons, inputs, cards, navigation, feedback, empty states, and repeated patterns.
 - Motion: what moves, why it moves, duration/easing, and reduced-motion behavior.
 - Assets: real assets used or needed; do not invent logos or decorative replacements.
+
+## Component Inventory
+
+Track the semantic regions that future edits should preserve. Each stable region should map to "data-comment-anchor" in "src/generated/Screen.tsx".
+
+- navigation:
+- hero:
+- primary-action:
+- feature-list:
+- preview:
+- footer:
+
+## Revision Rules
+
+- Continue inside this design system unless the user explicitly asks for a new direction.
+- For a component-level request, edit only the matching anchor's semantic region.
+- Preserve unrelated layout, spacing, typography, color, copy, and anchor ids.
+- Record meaningful system changes here so future requests build on the same foundation.
 
 ## Content Rules
 

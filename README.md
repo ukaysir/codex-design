@@ -11,6 +11,8 @@ DesignForge is a local Windows desktop scaffold for a Codex-powered UI generatio
 - Starter workspace file generation
 - Workspace-scoped file list/read/write commands
 - `claude-design.md`-priority prompt compiler driven from chat
+- Persistent design-system revision mode: existing `DESIGN.md`, generated screen, anchors, and visual vocabulary are preserved unless the user explicitly asks for a new direction
+- Component-level edit flow: preview click selection or anchor-list selection creates a targeted `@anchor` edit request with `<mentioned-element>` context
 - Codex CLI check and `codex exec` runner
 - One-pass automatic repair when generated workspace verification fails
 - Run history persisted to `.designforge/runs.jsonl`
@@ -55,6 +57,7 @@ The current Windows environment has completed:
 npm run typecheck
 node ./node_modules/typescript/bin/tsc --noEmit --noUnusedLocals --noUnusedParameters --pretty false
 npm run build
+Push-Location designforge-workspace; npm run typecheck; npm run build; Pop-Location
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npx --yes knip --reporter compact
@@ -155,6 +158,7 @@ Existing files are not overwritten.
 - Repair currently runs once per chat request.
 - Screenshot-driven critique runs only when screenshot capture succeeds; otherwise the app records a no-screenshot critique manifest.
 - Element-level feedback uses `@anchor-name` references from `.designforge/anchors.json`.
+- Preview click editing depends on generated elements carrying `data-comment-anchor`; unanchored elements can still be edited through chat but are not directly selectable.
 - Preview process, HTTP status, screenshot evidence, and console evidence are recorded.
 - Handoff export is packaged directly by the Tauri backend.
 - Screenshot capture requires Microsoft Edge or Chrome headless CLI.
@@ -168,6 +172,7 @@ Existing files are not overwritten.
 
 1. Add an environment health panel for Node, npm, Rust, WebView2, Codex CLI, browser capture, and workspace dependency status.
 2. Add profiling markers for slow stages if users still see lag after the command-thread and render reductions.
-3. Add richer run diagnostics for Codex sandbox fallback, repair attempts, critique pass, screenshot capture, console capture, and export verification.
-4. Add richer export formats: standalone HTML first, then PDF/PPTX if needed.
-5. Add settings UI for workspace path, Codex path, package manager, and browser capture options.
+3. Add source-level inline text/style splicing for simple direct edits before invoking Codex.
+4. Add richer run diagnostics for Codex sandbox fallback, repair attempts, critique pass, screenshot capture, console capture, and export verification.
+5. Add richer export formats: standalone HTML first, then PDF/PPTX if needed.
+6. Add settings UI for workspace path, Codex path, package manager, and browser capture options.
