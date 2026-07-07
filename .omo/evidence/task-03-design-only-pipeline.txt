@@ -1,0 +1,18 @@
+src/App.tsx:2395:  async function startPreviewSafely() {
+src/App.tsx:2432:  async function verifyWorkspace(path: string) {
+src/App.tsx:2697:      const result = await verifyWorkspace(path);
+src/App.tsx:2717:  async function runManualRepair() {
+src/App.tsx:2747:  async function runManualCapture() {
+src/App.tsx:2787:  async function runManualCritique() {
+src/App.tsx:2855:  async function runManualQualityAudit() {
+src/App.tsx:2941:  async function runManualExport() {
+src/App.tsx:3760:              onClick={() => void startPreviewSafely()}
+src/App.tsx:3814:                    <Button className="mt-6" variant="primary" onClick={() => void startPreviewSafely()} disabled={busy || !workspacePath}>
+src/App.tsx:4099:              onClick={() => void startPreviewSafely()}
+src/App.tsx:4735:              onClick={() => void runManualRepair()}
+src/App.tsx:4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+src/App.tsx:4745:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+src/App.tsx:4749:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+src/App.tsx:4753:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+
+NODE_CHECK_EXIT: 0 (.omo/evidence/check-task-03-design-only.cjs)

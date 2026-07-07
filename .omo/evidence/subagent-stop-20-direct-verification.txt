@@ -1,0 +1,39 @@
+HOOK DIRECT VERIFICATION subagent-stop:20
+repo: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main
+timestamp_utc: 2026-07-07T11:08:53.9379050Z
+NOTE: sequential rerun with simple quoting after discarded failed transcript.
+
+## image residue rg source-only
+COMMAND: rtk rg -n image-generation residue pattern src src-tauri --glob !src-tauri/target/**
+exit_code: 1
+JUDGMENT image residue: PASS no matches
+
+## install automation rg source-only
+COMMAND: rtk rg -n ensure_workspace_dependencies OR literal arg("install") src-tauri/src src --glob !src-tauri/target/**
+exit_code: 1
+JUDGMENT install automation: PASS no matches
+
+## manual dependency message rg
+COMMAND: rtk rg -n manual dependency strings src-tauri/src/main.rs src/App.tsx
+src-tauri/src/main.rs:1387:    let typecheck = run_node_tool(&root, &["./node_modules/typescript/bin/tsc", "--noEmit"])?;
+src-tauri/src/main.rs:1392:    let build = run_node_tool(&root, &["./node_modules/vite/bin/vite.js", "build"])?;
+src-tauri/src/main.rs:1435:        .arg("./node_modules/vite/bin/vite.js")
+src-tauri/src/main.rs:2062:        "node_modules/vite/bin/vite.js",
+src-tauri/src/main.rs:2063:        "node_modules/typescript/bin/tsc",
+src-tauri/src/main.rs:2075:        "Missing workspace dependencies.\nRequired local files:\n- {}\nMissing local files:\n- {}\nInstall dependencies manually in this workspace before running preview or verify. DesignForge will not install Node packages automatically.",
+exit_code: 0
+JUDGMENT dependency message: PASS required manual install strings present
+
+## cargo availability probe
+COMMAND: rtk where.exe cargo; if found then rtk cargo check --manifest-path src-tauri/Cargo.toml
+INFO: Could not find files for the given pattern(s).
+where_exit_code: 1
+JUDGMENT cargo check: BLOCKED cargo not found in PATH; no toolchain installed
+
+## evidence artifact existence
+artifact: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main\.omo\evidence\task-02-backend-image-residue.txt length=64
+artifact: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main\.omo\evidence\task-04-backend-reverify.txt length=972
+artifact: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main\.omo\evidence\subagent-stop-20-direct-verification.txt length=1887
+JUDGMENT artifacts: PASS files exist and are non-empty
+
+OVERALL: PASS_WITH_CARGO_BLOCKER_IF_UNAVAILABLE

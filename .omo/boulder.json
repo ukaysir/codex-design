@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "active_work_id": "codex-design-workflow-redesign",
+  "works": {
+    "codex-design-workflow-redesign": {
+      "work_id": "codex-design-workflow-redesign",
+      "active_plan": ".omo/plans/codex-design-workflow-redesign.md",
+      "plan_name": "codex-design-workflow-redesign",
+      "session_ids": [
+        "codex:019f3bf6-b957-7b82-a59c-7d2f3ee61243"
+      ],
+      "status": "active",
+      "worktree_path": "C:/Users/CKIRUser/Downloads/codex-design-main/codex-design-main"
+    }
+  }
+}

@@ -298,7 +298,6 @@ fn reset_workspace_design_state(workspace_path: String) -> Result<(), String> {
         ".designforge/tokens.json",
         ".designforge/static-check.json",
         ".designforge/quality-audit.json",
-        ".designforge/generated-images.json",
         ".designforge/codex-prompts/latest.md",
         "prompts/latest.md",
         "prompts/clarification-latest.md",
@@ -1374,15 +1373,16 @@ async fn verify_workspace(
     workspace_path: String,
     package_manager: String,
 ) -> Result<CommandResult, String> {
-    run_blocking(move || verify_workspace_blocking(workspace_path, package_manager)).await
+    run_blocking(move || {
+        let _ = package_manager;
+        verify_workspace_blocking(workspace_path)
+    })
+    .await
 }
 
-fn verify_workspace_blocking(
-    workspace_path: String,
-    package_manager: String,
-) -> Result<CommandResult, String> {
+fn verify_workspace_blocking(workspace_path: String) -> Result<CommandResult, String> {
     let root = canonical_workspace(&workspace_path)?;
-    ensure_workspace_dependencies(&root, &package_manager)?;
+    require_workspace_dependencies(&root)?;
 
     let typecheck = run_node_tool(&root, &["./node_modules/typescript/bin/tsc", "--noEmit"])?;
     if !typecheck.success {
@@ -1407,7 +1407,8 @@ fn start_preview(
     state: State<'_, PreviewState>,
 ) -> Result<PreviewInfo, String> {
     let root = canonical_workspace(&workspace_path)?;
-    ensure_workspace_dependencies(&root, &package_manager)?;
+    let _ = package_manager;
+    require_workspace_dependencies(&root)?;
 
     let mut guard = state
         .0
@@ -2056,47 +2057,25 @@ fn preview_status_code() -> Result<i32, String> {
     }
 }
 
-fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(), String> {
-    if root.join("node_modules/vite/bin/vite.js").exists()
-        && root.join("node_modules/typescript/bin/tsc").exists()
-    {
+fn require_workspace_dependencies(root: &Path) -> Result<(), String> {
+    let required = [
+        "node_modules/vite/bin/vite.js",
+        "node_modules/typescript/bin/tsc",
+    ];
+    let missing = required
+        .into_iter()
+        .filter(|relative_path| !root.join(relative_path).exists())
+        .collect::<Vec<_>>();
+
+    if missing.is_empty() {
         return Ok(());
     }
 
-    let tool = match package_manager.trim() {
-        "" | "npm" => "npm",
-        "pnpm" => "pnpm",
-        "bun" => "bun",
-        _ => return Err("Unsupported package manager.".into()),
-    };
-
-    // ponytail: install-on-preview remains acceptable until a dependency status UI is added.
-    let output = package_command(tool)?
-        .current_dir(root)
-        .arg("install")
-        .output()
-        .map_err(|error| format!("Could not install workspace dependencies: {error}"))?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Dependency install failed:\n{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    }
-}
-
-fn package_command(tool: &str) -> Result<Command, String> {
-    if cfg!(windows) && tool == "npm" {
-        if let Some(cli) = npm_cli_path() {
-            let mut command = node_command()?;
-            command.arg(cli);
-            return Ok(command);
-        }
-    }
-    Ok(Command::new(package_tool(tool)))
+    Err(format!(
+        "Missing workspace dependencies.\nRequired local files:\n- {}\nMissing local files:\n- {}\nInstall dependencies manually in this workspace before running preview or verify. DesignForge will not install Node packages automatically.",
+        required.join("\n- "),
+        missing.join("\n- ")
+    ))
 }
 
 fn node_command() -> Result<Command, String> {
@@ -2124,25 +2103,6 @@ fn node_exe_path() -> Option<PathBuf> {
     candidates
         .into_iter()
         .find(|candidate| Command::new(candidate).arg("--version").output().is_ok())
-}
-
-fn package_tool(tool: &str) -> String {
-    if cfg!(windows) && tool != "bun" {
-        format!("{tool}.cmd")
-    } else {
-        tool.to_string()
-    }
-}
-
-fn npm_cli_path() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(root) = env::var_os("ProgramFiles") {
-        candidates.push(PathBuf::from(root).join("nodejs/node_modules/npm/bin/npm-cli.js"));
-    }
-    if let Some(root) = env::var_os("ProgramFiles(x86)") {
-        candidates.push(PathBuf::from(root).join("nodejs/node_modules/npm/bin/npm-cli.js"));
-    }
-    candidates.into_iter().find(|candidate| candidate.exists())
 }
 
 fn create_default_files(root: &Path) -> Result<(), String> {

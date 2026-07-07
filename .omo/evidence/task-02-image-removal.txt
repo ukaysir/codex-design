@@ -1,0 +1,43 @@
+src-tauri\src\main.rs:301:        ".designforge/generated-images.json",
+
+> designforge@0.1.0 build
+> node ./scripts/build.mjs
+
+
+## Diagnostic build invocation
+Invocation: node ./scripts/build.mjs
+Reason: npm PowerShell/cmd shims did not faithfully execute the build body in this environment; this is the script behind package.json build.
+--- stdout/stderr begin ---
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'typescript' imported from C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main\scripts\build.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:859:18)
+    at defaultResolve (node:internal/modules/esm/resolve:992:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+    at #resolve (node:internal/modules/esm/loader:683:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v24.18.0
+--- stdout/stderr end ---
+Exit code: 1
+
+## Cleanup receipt
+No long-lived process started.
+No browser used.
+No port used or opened.
+No tmux session used.
+
+## Verification notes
+Required rg invocation: rg -n "\$imagegen|runImageGenerationRequest|buildImageGenerationPrompt|isImageGenerationRequest|IMAGE_PROMPT_PATH|generated-images" src src-tauri > .omo/evidence/task-02-image-removal.txt || true
+Binary observable: output contains no src/App.tsx or src/lib active image-generation references; it still contains src-tauri/src/main.rs:301 for .designforge/generated-images.json, which is outside this task's allowed write scope.
+Required build invocation attempted: npm run build >> .omo/evidence/task-02-image-removal.txt
+Binary observable: npm shim printed the package script header but did not surface the script failure; direct execution of the same build script failed with ERR_MODULE_NOT_FOUND for package 'typescript' because node_modules is absent.

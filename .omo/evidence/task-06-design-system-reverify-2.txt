@@ -1,0 +1,198 @@
+Scenario: subagent-stop reverify #2 for Task 6 design system
+Timestamp: 2026-07-07T19:39:14+09:00
+Workdir: C:/Users/CKIRUser/Downloads/codex-design-main/codex-design-main
+
+## Files under allowed scope
+ M src/styles/globals.css
+?? .omo/evidence/task-06-design-system-reverify-2.txt
+?? .omo/evidence/task-06-design-system-reverify.txt
+?? .omo/evidence/task-06-design-system.txt
+?? DESIGN.md
+?? src/assets/fonts/jetbrains-mono/
+
+## Required command A: style/token scan
+COMMAND: rg -n "font-family|JetBrains|Berkeley|gradient|box-shadow|border-radius|#[0-9a-fA-F]{3,8}" DESIGN.md src/styles src
+DESIGN.md:13:| Surface/page | `--bg` | `#fdfcfc` | `#201d1d` | App body and primary canvas |
+DESIGN.md:14:| Surface/canvas | `--canvas` | `#fdfcfc` | `#201d1d` | Main work area |
+DESIGN.md:15:| Surface/panel | `--panel` | `#fdfcfc` | `#302c2c` | Primary panels |
+DESIGN.md:16:| Surface/soft | `--panel-2` | `#f8f7f7` | `#302c2c` | Secondary rows, inputs |
+DESIGN.md:17:| Surface/card | `--panel-3` | `#f1eeee` | `#302c2c` | Inset snippets, disabled fills |
+DESIGN.md:19:| Border/strong | `--line-strong` | `#646262` | `#9a9898` | Active dividers and selected edges |
+DESIGN.md:20:| Text/primary | `--ink` | `#201d1d` | `#fdfcfc` | Primary text |
+DESIGN.md:21:| Text/strong | `--ink-strong` | `#0f0000` | `#ffffff` | Emphasis and pressed ink |
+DESIGN.md:22:| Text/body | `--charcoal` | `#302c2c` | `#f1eeee` | Body text with slightly softer weight |
+DESIGN.md:23:| Text/muted | `--muted` | `#646262` | `#c8c4c4` | Secondary labels |
+DESIGN.md:24:| Text/faint | `--mute` | `#9a9898` | `#9a9898` | Disabled, hints, timestamps |
+DESIGN.md:25:| Action/primary | `--primary` | `#201d1d` | `#fdfcfc` | Primary buttons and selected actions |
+DESIGN.md:26:| Action/pressed | `--primary-strong` | `#0f0000` | `#f1eeee` | Active primary state |
+DESIGN.md:27:| Action/on-primary | `--on-primary` | `#fdfcfc` | `#201d1d` | Text on primary fill |
+DESIGN.md:28:| TUI/accent | `--accent` | `#007aff` | `#5eb1ff` | Informational TUI syntax only |
+DESIGN.md:29:| State/warning | `--warning` | `#ff9f0a` | `#ffbd45` | Caution states |
+DESIGN.md:30:| State/danger | `--danger` | `#ff3b30` | `#ff6961` | Error and destructive states |
+DESIGN.md:31:| State/success | `--success` | `#30d158` | `#62e27b` | Success states |
+DESIGN.md:32:| TUI/dark | `--surface-dark` | `#201d1d` | `#0f0000` | Terminal preview and runtime output |
+DESIGN.md:33:| TUI/on-dark | `--on-dark` | `#fdfcfc` | `#fdfcfc` | Text on dark surfaces |
+DESIGN.md:60:- Primary and mono: `"JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`
+src/styles\globals.css:6:  font-family: "JetBrains Mono";
+src/styles\globals.css:7:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+src/styles\globals.css:14:  font-family: "JetBrains Mono";
+src/styles\globals.css:15:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+src/styles\globals.css:22:  font-family: "JetBrains Mono";
+src/styles\globals.css:23:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+src/styles\globals.css:31:  --bg: #fdfcfc;
+src/styles\globals.css:32:  --canvas: #fdfcfc;
+src/styles\globals.css:33:  --panel: #fdfcfc;
+src/styles\globals.css:34:  --panel-dark: #201d1d;
+src/styles\globals.css:35:  --panel-2: #f8f7f7;
+src/styles\globals.css:36:  --panel-3: #f1eeee;
+src/styles\globals.css:38:  --line-strong: #646262;
+src/styles\globals.css:39:  --ink: #201d1d;
+src/styles\globals.css:40:  --ink-strong: #0f0000;
+src/styles\globals.css:41:  --charcoal: #302c2c;
+src/styles\globals.css:42:  --muted: #646262;
+src/styles\globals.css:43:  --mute: #9a9898;
+src/styles\globals.css:44:  --primary: #201d1d;
+src/styles\globals.css:45:  --primary-strong: #0f0000;
+src/styles\globals.css:46:  --on-primary: #fdfcfc;
+src/styles\globals.css:47:  --accent: #007aff;
+src/styles\globals.css:49:  --surface-dark: #201d1d;
+src/styles\globals.css:50:  --surface-dark-elevated: #302c2c;
+src/styles\globals.css:51:  --on-dark: #fdfcfc;
+src/styles\globals.css:53:  --warning: #ff9f0a;
+src/styles\globals.css:54:  --danger: #ff3b30;
+src/styles\globals.css:55:  --success: #30d158;
+src/styles\globals.css:56:  --terminal-red: #ff5f56;
+src/styles\globals.css:57:  --terminal-yellow: #ffbd2e;
+src/styles\globals.css:58:  --terminal-green: #27c93f;
+src/styles\globals.css:71:  font-family:
+src/styles\globals.css:72:    "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+src/styles\globals.css:121:  border-radius: var(--radius-sm);
+src\App.tsx:682:  const styleFamilies = regexValues(styles, /font-family\s*:\s*([^;\n]+)/gi, 24);
+src\App.tsx:3882:        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[#fbfaf7] px-4 py-3"
+src\App.tsx:4840:    <div className="rounded-xl border border-[#2a2a2a] bg-[var(--surface-dark)] p-3 text-white">
+src\components\ChatRow.tsx:114:          ? "border-[#101010] bg-[#101010] text-white"
+src\styles\globals.css:6:  font-family: "JetBrains Mono";
+src\styles\globals.css:7:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+src\styles\globals.css:14:  font-family: "JetBrains Mono";
+src\styles\globals.css:15:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+src\styles\globals.css:22:  font-family: "JetBrains Mono";
+src\styles\globals.css:23:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+src\styles\globals.css:31:  --bg: #fdfcfc;
+src\styles\globals.css:32:  --canvas: #fdfcfc;
+src\styles\globals.css:33:  --panel: #fdfcfc;
+src\styles\globals.css:34:  --panel-dark: #201d1d;
+src\styles\globals.css:35:  --panel-2: #f8f7f7;
+src\styles\globals.css:36:  --panel-3: #f1eeee;
+src\styles\globals.css:38:  --line-strong: #646262;
+src\styles\globals.css:39:  --ink: #201d1d;
+src\styles\globals.css:40:  --ink-strong: #0f0000;
+src\styles\globals.css:41:  --charcoal: #302c2c;
+src\styles\globals.css:42:  --muted: #646262;
+src\styles\globals.css:43:  --mute: #9a9898;
+src\styles\globals.css:44:  --primary: #201d1d;
+src\styles\globals.css:45:  --primary-strong: #0f0000;
+src\styles\globals.css:46:  --on-primary: #fdfcfc;
+src\styles\globals.css:47:  --accent: #007aff;
+src\styles\globals.css:49:  --surface-dark: #201d1d;
+src\styles\globals.css:50:  --surface-dark-elevated: #302c2c;
+src\styles\globals.css:51:  --on-dark: #fdfcfc;
+src\styles\globals.css:53:  --warning: #ff9f0a;
+src\styles\globals.css:54:  --danger: #ff3b30;
+src\styles\globals.css:55:  --success: #30d158;
+src\styles\globals.css:56:  --terminal-red: #ff5f56;
+src\styles\globals.css:57:  --terminal-yellow: #ffbd2e;
+src\styles\globals.css:58:  --terminal-green: #27c93f;
+src\styles\globals.css:71:  font-family:
+src\styles\globals.css:72:    "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+src\styles\globals.css:121:  border-radius: var(--radius-sm);
+src\lib\workspace-bridge.ts:61:      'html[data-designforge-select="1"] [data-designforge-selected="true"] { outline: 3px solid #bef264 !important; outline-offset: 3px; }',
+src\lib\prompt-template.ts:45:  "Avoid AI slop: filler sections, fake metrics, generic SaaS layouts, decorative gradients without purpose, emoji unless the brand uses it, left-border accent cards, and timid evenly-distributed palettes.",
+src\lib\prompt-template.ts:407:2. Look for visible design failures: weak hierarchy, generic AI composition, poor spacing rhythm, washed-out contrast, overflowing text, cramped controls, fake content, decorative gradients, left-border accent cards, and inaccessible focus/semantic issues.
+
+## Required command B: legacy scan
+COMMAND: rg -n "Berkeley|Inter|SF Pro|Segoe UI|box-shadow|rounded-\[18px\]|rounded-lg|linear-gradient|radial-gradient" DESIGN.md src/styles src/App.tsx || true
+src/App.tsx:480:  "Interaction and State Model",
+src/App.tsx:1853:        "1. Request fit: artifact type, fidelity, audience, constraints, and option count.\n2. Source truth: assets, code, design systems, screenshots, and prior chat.\n3. System first: purpose, tone, differentiation, tokens, components, motion, and content rules.\n4. Content economy: no filler, fake metrics, or unrequested material.\n5. Visual distinctiveness: memorable direction, not generic AI defaults.\n6. Composition and scale: hierarchy, density, viewport, responsiveness, and type scale.\n7. Interaction realism: hover, focus, active, loading, empty, error, validation, and navigation states.\n8. Editability and anchors: literal copy, stable data-comment-anchor values, and narrow targeted edits.\n9. Asset integrity: real assets only, no invented logos/icons, no copyrighted recreation.\n10. Verification and handoff: previewability, assumptions, caveats, and implementation details.",
+src/App.tsx:1854:      "Interaction and State Model":
+src/App.tsx:2612:## Interactions & Behavior
+src/App.tsx:3908:            className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-[var(--muted)] transition hover:bg-white hover:text-[var(--ink)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
+src/App.tsx:3951:                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--charcoal)]">
+src/App.tsx:3982:                        className="flex min-h-7 items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 text-[11px] text-[var(--charcoal)]"
+src/App.tsx:4617:              <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3 text-[11px] leading-5 text-[var(--muted)]">
+src/App.tsx:4627:            <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3">
+src/App.tsx:4692:              className="mt-2 min-h-28 w-full resize-none rounded-[18px] border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+src/App.tsx:4709:            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 rounded-[18px] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(31,41,55,0.035)]">
+src/App.tsx:4727:              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-[18px] border border-[var(--line)] bg-white px-3 py-3">
+
+## Assertion 1: DESIGN.md exists and has exactly seven required sections
+PASS: DESIGN.md exists and is non-empty
+3:## 1. Atmosphere & Identity
+7:## 2. Color
+42:## 3. Typography
+70:## 4. Spacing & Layout
+101:## 5. Components
+148:## 6. Motion & Behavior
+165:## 7. Depth & Surface
+Observed section count: 7
+PASS: seven sections present
+
+## Assertion 2: JetBrains Mono first in global font stack
+6:  font-family: "JetBrains Mono";
+7:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+8:  font-style: normal;
+14:  font-family: "JetBrains Mono";
+15:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+16:  font-style: normal;
+22:  font-family: "JetBrains Mono";
+23:  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+24:  font-style: normal;
+71:  font-family:
+72:    "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+73:    monospace;
+Observed first root stack line:     "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+PASS: JetBrains Mono first
+
+## Assertion 3: OpenCode CSS tokens present
+31:  --bg: #fdfcfc;
+PASS token: --bg: #fdfcfc
+32:  --canvas: #fdfcfc;
+PASS token: --canvas: #fdfcfc
+39:  --ink: #201d1d;
+PASS token: --ink: #201d1d
+44:  --primary: #201d1d;
+PASS token: --primary: #201d1d
+49:  --surface-dark: #201d1d;
+PASS token: --surface-dark: #201d1d
+60:  --radius-sm: 4px;
+PASS token: --radius-sm: 4px
+
+## Assertion 4: no Berkeley reference remains in required paths
+PASS: no Berkeley reference remains
+
+## Assertion 5: changed design/CSS files have no forbidden legacy style tokens
+PASS: changed design/CSS files have no forbidden legacy style tokens
+
+## Assertion 6: second legacy scan matches are only src/App.tsx
+PASS: command B legacy matches are only src/App.tsx
+
+## Note on command A non-App gradient matches
+Command A scans all src and reports prompt-template text containing the word gradient. Those lines are not CSS style implementation and prompt-template is explicitly out of write scope.
+45:  "Avoid AI slop: filler sections, fake metrics, generic SaaS layouts, decorative gradients without purpose, emoji unless the brand uses it, left-border accent cards, and timid evenly-distributed palettes.",
+407:2. Look for visible design failures: weak hierarchy, generic AI composition, poor spacing rhythm, washed-out contrast, overflowing text, cramped controls, fake content, decorative gradients, left-border accent cards, and inaccessible focus/semantic issues.
+
+## Font files are local and non-empty
+92380 src/assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2
+PASS font: src/assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2
+94284 src/assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2
+PASS font: src/assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2
+94628 src/assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2
+PASS font: src/assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2
+
+## Evidence files are non-empty
+ 9602 .omo/evidence/task-06-design-system.txt
+11951 .omo/evidence/task-06-design-system-reverify.txt
+21553 total
+
+## Final judgment
+PASS: Task 6 verified from current filesystem state.
+Cleanup receipt: no long-lived process, browser, port, or tmux session used.

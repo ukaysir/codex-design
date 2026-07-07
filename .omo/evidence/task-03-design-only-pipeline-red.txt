@@ -1,0 +1,12 @@
+[eval]:1
+const fs=require(\ fs\); const s=fs.readFileSync(\src/App.tsx\,\utf8\); const m=s.match(/async function runDesignRequest[\\s\\S]*?\\n  async function/); if(!m){throw new Error(\runDesignRequest block not found\)} const forbidden=[\startPreviewSafely\,\verifyWorkspace\,\runManualCapture\,\runManualCritique\,\runManualQualityAudit\,\runManualRepair\,\runManualExport\,\typecheck\,\tsc --noEmit\,\ensurePreviewSelectionBridge\]; const found=forbidden.filter(function(x){return m[0].includes(x)}); console.log(found.length ? found.join(\\\n\) : \no forbidden calls\); process.exit(found.length ? 1 : 0)
+                 ^
+Expected unicode escape
+
+SyntaxError: Invalid or unexpected token
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.18.0

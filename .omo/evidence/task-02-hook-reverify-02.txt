@@ -1,0 +1,121 @@
+Task 2 hook re-verification, corrected
+Timestamp: 2026-07-07T19:41:02.2403220+09:00
+Repo: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main
+
+## Command 1
+Invocation: rg -n '\$imagegen|runImageGenerationRequest|buildImageGenerationPrompt|isImageGenerationRequest|IMAGE_PROMPT_PATH|generated-images' src src-tauri
+Surface: PowerShell terminal invoking ripgrep in repository root
+--- stdout/stderr begin ---
+src-tauri\src\main.rs:301:        ".designforge/generated-images.json",
+
+--- stdout/stderr end ---
+Exit code: 0
+
+## Command 2
+Invocation: rg -n '\$imagegen|runImageGenerationRequest|buildImageGenerationPrompt|isImageGenerationRequest|IMAGE_PROMPT_PATH|generated-images|ImageIcon|buildSectionImageTasks|isMultiSectionImageRequest|shouldApplyGeneratedImagesToScreen|GENERATED_IMAGES_PATH|GENERATED_IMAGES_DIR|writeImageGenerationPrompt|listGeneratedImageFiles|from "\./lib/image-generation"' src
+Surface: targeted in-scope source search for removed active feature symbols
+--- stdout/stderr begin ---
+
+--- stdout/stderr end ---
+Exit code: 1
+
+## Command 3
+Invocation: rg -n 'ATTACHMENTS_MANIFEST_PATH|ATTACHMENTS_DIR|pendingAttachments|addPendingFiles|pastePendingFiles|requestWithAttachments|clipboardAttachmentFiles|designforge-attachments' src/App.tsx
+Surface: attachment preservation source check
+--- stdout/stderr begin ---
+119:const ATTACHMENTS_MANIFEST_PATH = ".designforge/attachments.json";
+120:const ATTACHMENTS_DIR = ".designforge/attachments";
+372:  return `${ATTACHMENTS_DIR}/${id}-${safeAttachmentName(name)}`;
+397:function clipboardAttachmentFiles(data: DataTransfer | null) {
+444:function requestWithAttachments(request: string, attachments: AttachmentInfo[]) {
+999:  const [pendingAttachments, setPendingAttachments] = useState<AttachmentInfo[]>([]);
+1329:      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: ATTACHMENTS_MANIFEST_PATH });
+1355:      relativePath: ATTACHMENTS_MANIFEST_PATH,
+1361:  async function addPendingFiles(files: FileList | File[] | null, source: "picker" | "clipboard" = "picker") {
+1414:  async function pastePendingFiles(event: ClipboardEvent<HTMLTextAreaElement>) {
+1415:    const files = clipboardAttachmentFiles(event.clipboardData);
+1419:    await addPendingFiles(files, "clipboard");
+3044:    const requestForCodex = requestWithAttachments(request, attachments);
+3150:    if ((!request && pendingAttachments.length === 0) || busy) return;
+3151:    const attachments = pendingAttachments;
+3253:    const requestForCodex = requestWithAttachments(request, attachments);
+3964:                  onPaste={(event) => void pastePendingFiles(event)}
+3977:                {pendingAttachments.length ? (
+3979:                    {pendingAttachments.map((attachment) => (
+4003:                      id="designforge-attachments"
+4008:                        void addPendingFiles(event.currentTarget.files);
+4017:                      onClick={() => document.getElementById("designforge-attachments")?.click()}
+4035:                      disabled={busy || (!input && !guidedDraft && pendingAttachments.length === 0)}
+4041:                    <Button variant="primary" onClick={runChat} disabled={busy || (!input.trim() && pendingAttachments.length === 0)} className="h-8 min-h-8 shrink-0 px-3 text-[11px]">
+
+--- stdout/stderr end ---
+Exit code: 0
+
+## Command 4
+Invocation: npm run build
+Surface: requested package build command
+--- stdout/stderr begin ---
+
+> designforge@0.1.0 build
+> node ./scripts/build.mjs
+
+
+--- stdout/stderr end ---
+Exit code: -4048
+
+## Command 5
+Invocation: node ./scripts/build.mjs
+Surface: direct build script body to verify npm shim output
+--- stdout/stderr begin ---
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'typescript' imported from C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main\scripts\build.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:859:18)
+    at defaultResolve (node:internal/modules/esm/resolve:992:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+    at #resolve (node:internal/modules/esm/loader:683:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v24.18.0
+
+--- stdout/stderr end ---
+Exit code: 1
+
+## Command 6
+Invocation: Test-Path node_modules; Test-Path node_modules/typescript; Test-Path package-lock.json
+--- stdout/stderr begin ---
+node_modules exists: False
+node_modules/typescript exists: False
+package-lock exists: True
+--- stdout/stderr end ---
+Exit code: 0
+
+## Command 7
+Invocation: git diff --check -- src/App.tsx src/lib/prompt-template.ts
+--- stdout/stderr begin ---
+warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/prompt-template.ts', LF will be replaced by CRLF the next time Git touches it
+
+--- stdout/stderr end ---
+Exit code: 0
+
+## Judgment
+In-scope active source removal: PASS when Command 2 exit code is 1 (no matches).
+Attachment preservation: PASS when Command 3 lists attachment constants, pending UI, paste/file attach, and requestWithAttachments.
+Required whole-tree rg: NOT CLEAN because Command 1 still reports src-tauri/src/main.rs generated-images scaffold text, which was outside allowed write scope.
+Build: NOT PASS because dependencies are missing; Command 5 fails with ERR_MODULE_NOT_FOUND for package 'typescript' and Command 6 shows node_modules absent.
+
+## Cleanup receipt
+No long-lived process started.
+No browser used.
+No port used or opened.
+No tmux session used.

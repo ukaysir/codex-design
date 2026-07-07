@@ -1,0 +1,127 @@
+DesignForge workflow redesign RED/current-state characterization evidence
+Timestamp: 2026-07-07T19:18:38.8621318+09:00
+Repo: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main
+
+## Command 1
+Invocation: rg -n "\$imagegen|runImageGenerationRequest|buildImageGenerationPrompt|isImageGenerationRequest|IMAGE_PROMPT_PATH|GENERATED_IMAGES|generated-images|ImageIcon" src src-tauri
+Surface: PowerShell terminal invoking ripgrep in repository root
+--- stdout/stderr begin ---
+src\App.tsx:8:  Image as ImageIcon,
+src\App.tsx:32:  buildImageGenerationPrompt,
+src\App.tsx:53:  isImageGenerationRequest,
+src\App.tsx:118:const IMAGE_PROMPT_PATH = "prompts/image-latest.md";
+src\App.tsx:130:const GENERATED_IMAGES_PATH = ".designforge/generated-images.json";
+src\App.tsx:131:const GENERATED_IMAGES_DIR = "assets/generated";
+src\App.tsx:586:  if (hasAttachments || isImageGenerationRequest(request)) return false;
+src\App.tsx:1070:            IMAGE_PROMPT_PATH,
+src\App.tsx:1082:            GENERATED_IMAGES_PATH,
+src\App.tsx:1087:          file.relativePath.startsWith(`${GENERATED_IMAGES_DIR}/`) ||
+src\App.tsx:2233:    const prompt = buildImageGenerationPrompt(request, {
+src\App.tsx:2240:      relativePath: IMAGE_PROMPT_PATH,
+src\App.tsx:2243:    pushLog("success", `Compiled ${IMAGE_PROMPT_PATH}.`);
+src\App.tsx:3072:      .filter((file) => !file.isDirectory && file.relativePath.startsWith(`${GENERATED_IMAGES_DIR}/`) && /\.(png|jpe?g|webp|gif|avif)$/i.test(file.relativePath))
+src\App.tsx:3077:  async function runImageGenerationRequest(rawRequest: string, options: Pick<RunRequestOptions, "attachments" | "displayRequest" | "recordRequest"> = {}) {
+src\App.tsx:3115:        ? buildSectionImageTasks(requestForCodex, existingAnchorManifest?.anchors ?? [], GENERATED_IMAGES_DIR)
+src\App.tsx:3145:          details: [IMAGE_PROMPT_PATH, `task=${task.id}`],
+src\App.tsx:3161:            details: newFiles.length ? newFiles : [`새 파일을 감지하지 못했습니다. ${GENERATED_IMAGES_DIR} 전체를 다시 확인합니다.`],
+src\App.tsx:3189:        relativePath: GENERATED_IMAGES_PATH,
+src\App.tsx:3194:            promptPath: IMAGE_PROMPT_PATH,
+src\App.tsx:3200:              ? [`${imageFiles.length} generated image file(s) found in ${GENERATED_IMAGES_DIR}.`]
+src\App.tsx:3201:              : [`No generated image files were detected under ${GENERATED_IMAGES_DIR}. Check Codex output for details.`],
+src\App.tsx:3266:        promptPath: IMAGE_PROMPT_PATH,
+src\App.tsx:3267:        artifactPath: placementResult ? ARTIFACT_PATH : GENERATED_IMAGES_DIR,
+src\App.tsx:3287:          : [`이미지 생성 턴은 완료됐지만 ${GENERATED_IMAGES_DIR}에서 결과 파일을 찾지 못했습니다.`],
+src\App.tsx:3288:        artifactPath: placementResult ? ARTIFACT_PATH : GENERATED_IMAGES_DIR,
+src\App.tsx:3303:          promptPath: IMAGE_PROMPT_PATH,
+src\App.tsx:3304:          artifactPath: GENERATED_IMAGES_DIR,
+src\App.tsx:3446:      if (isImageGenerationRequest(effectiveRequest)) {
+src\App.tsx:3447:        await runImageGenerationRequest(effectiveRequest, { attachments });
+src\App.tsx:4315:                        void runImageGenerationRequest(imageRequest, { attachments });
+src\App.tsx:4318:                      title="Codex $imagegen으로 이미지 에셋을 생성합니다."
+src\App.tsx:4321:                      <ImageIcon size={13} strokeWidth={2.6} />
+src\lib\prompt-template.ts:135:export function buildImageGenerationPrompt(userRequest: string, options: PromptOptions = {}) {
+src\lib\prompt-template.ts:141:$imagegen
+src\lib\prompt-template.ts:163:- Write .designforge/generated-images.json with updatedAt, request, imageFiles, sourcePrompt, and notes.
+src\lib\image-generation.ts:9:export function isImageGenerationRequest(request: string) {
+src\lib\image-generation.ts:10:  return /\$imagegen|이미지\s*(생성|만들|그려|제작)|그림\s*(생성|만들|그려|제작)|generate\s+(an?\s+)?image|create\s+(an?\s+)?image/i.test(request);
+src\lib\image-generation.ts:15:    isImageGenerationRequest(request) &&
+src-tauri\src\main.rs:301:        ".designforge/generated-images.json",
+--- stdout/stderr end ---
+Exit code: 0
+
+## Command 2
+Invocation: rg -n "ensure_workspace_dependencies|start_preview|verify_workspace|runManualCapture|runManualCritique|runManualQuality|runManualRepair|tsc|install" src src-tauri
+Surface: PowerShell terminal invoking ripgrep in repository root
+--- stdout/stderr begin ---
+src-tauri\AGENTS.md:30:| Change verification | `verify_workspace_blocking`, `run_node_tool`, package tool helpers | Workspace dependency install may run first |
+src-tauri\AGENTS.md:31:| Change preview/capture | `start_preview`, `capture_screenshot_blocking`, `capture_console_blocking` | Browser discovery is Windows-path aware |
+src-tauri\src\scaffold.rs:13:pub const WORKSPACE_TSCONFIG: &str = include_str!("scaffold/tsconfig.json");
+src\App.tsx:2411:    const info = await callTauri<PreviewInfo>("start_preview", {
+src\App.tsx:2462:    const result = await callTauri<CommandResult>("verify_workspace", {
+src\App.tsx:2747:  async function runManualRepair() {
+src\App.tsx:2777:  async function runManualCapture() {
+src\App.tsx:2817:  async function runManualCritique() {
+src\App.tsx:2918:  async function runManualQualityAudit() {
+src\App.tsx:5067:              onClick={() => void runManualRepair()}
+src\App.tsx:5073:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+src\App.tsx:5077:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+src\App.tsx:5081:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+src-tauri\src\scaffold\console-capture.html:77:            send({ type: "status", level: "info", text: "console hook installed" });
+src-tauri\src\scaffold\package.json:9:    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit"
+src-tauri\src\main.rs:1373:async fn verify_workspace(
+src-tauri\src\main.rs:1377:    run_blocking(move || verify_workspace_blocking(workspace_path, package_manager)).await
+src-tauri\src\main.rs:1380:fn verify_workspace_blocking(
+src-tauri\src\main.rs:1385:    ensure_workspace_dependencies(&root, &package_manager)?;
+src-tauri\src\main.rs:1387:    let typecheck = run_node_tool(&root, &["./node_modules/typescript/bin/tsc", "--noEmit"])?;
+src-tauri\src\main.rs:1404:fn start_preview(
+src-tauri\src\main.rs:1410:    ensure_workspace_dependencies(&root, &package_manager)?;
+src-tauri\src\main.rs:1652:            verify_workspace,
+src-tauri\src\main.rs:1653:            start_preview,
+src-tauri\src\main.rs:2059:fn ensure_workspace_dependencies(root: &Path, package_manager: &str) -> Result<(), String> {
+src-tauri\src\main.rs:2061:        && root.join("node_modules/typescript/bin/tsc").exists()
+src-tauri\src\main.rs:2073:    // ponytail: install-on-preview remains acceptable until a dependency status UI is added.
+src-tauri\src\main.rs:2076:        .arg("install")
+src-tauri\src\main.rs:2078:        .map_err(|error| format!("Could not install workspace dependencies: {error}"))?;
+src-tauri\src\main.rs:2084:            "Dependency install failed:\n{}{}",
+src-tauri\src\main.rs:2184:    write_if_missing(root.join("tsconfig.json"), WORKSPACE_TSCONFIG)?;
+--- stdout/stderr end ---
+Exit code: 0
+
+## Command 3
+Invocation: rg -n "selectionMode|previewFrameSrc|selectedComponent|ensurePreviewSelectionBridge|composer" src
+Surface: PowerShell terminal invoking ripgrep in repository root
+--- stdout/stderr begin ---
+src\App.tsx:353:function previewFrameSrc(url: string, selectionMode: boolean) {
+src\App.tsx:354:  if (!selectionMode) return url;
+src\App.tsx:1026:  const [selectionMode, setSelectionMode] = useState(false);
+src\App.tsx:1746:  async function ensurePreviewSelectionBridge(path: string) {
+src\App.tsx:2410:    await ensurePreviewSelectionBridge(path);
+src\App.tsx:2714:    await ensurePreviewSelectionBridge(path);
+src\App.tsx:3104:      await ensurePreviewSelectionBridge(path);
+src\App.tsx:3336:      await ensurePreviewSelectionBridge(path);
+src\App.tsx:3566:      await ensurePreviewSelectionBridge(path);
+src\App.tsx:4114:              {selectionMode ? "선택 중" : "선택 수정"}
+src\App.tsx:4141:                  src={previewFrameSrc(preview.url, selectionMode)}
+src\App.tsx:4144:                    selectionMode && "ring-4 ring-[var(--focus-ring)] ring-inset",
+src\App.tsx:4454:              variant={selectionMode ? "primary" : "ghost"}
+src\App.tsx:4496:                src={previewFrameSrc(preview.url, selectionMode)}
+src\App.tsx:4499:                  selectionMode && "ring-4 ring-[var(--focus-ring)]",
+src\App.tsx:4517:                        <p className="text-sm font-semibold text-[var(--primary)]">composer</p>
+src\App.tsx:4875:            <Badge tone={selectedAnchorId ? "lime" : selectionMode ? "cyan" : "steel"}>{selectedAnchorLabel}</Badge>
+src\App.tsx:4887:                variant={selectionMode ? "primary" : "secondary"}
+src\App.tsx:4893:                {selectionMode ? "선택 중" : "클릭 선택"}
+--- stdout/stderr end ---
+Exit code: 0
+
+## Classification
+Verdict: RED
+Reason: current forbidden image/runtime/install paths are present: buildImageGenerationPrompt, ensure_workspace_dependencies, GENERATED_IMAGES, generated-images, IMAGE_PROMPT_PATH, ImageIcon, install, isImageGenerationRequest, runImageGenerationRequest, runManualCapture, runManualCritique, runManualQuality, runManualRepair, start_preview, tsc, verify_workspace
+
+## Cleanup receipt
+No process started beyond short-lived read-only ripgrep/PowerShell commands.
+No tmux session used.
+No browser used.
+No port used or opened.
+
+## Conclusion
+Current-state characterization is RED: the searched source surfaces still contain forbidden image/runtime/install paths.

@@ -1,0 +1,49 @@
+src\App.tsx:342:function previewFrameSrc(url: string, selectionMode: boolean) {
+src\App.tsx:343:  if (!selectionMode) return url;
+src\App.tsx:1015:  const [selectionMode, setSelectionMode] = useState(false);
+src\App.tsx:1732:  async function ensurePreviewSelectionBridge(path: string) {
+src\App.tsx:2381:    await ensurePreviewSelectionBridge(path);
+src\App.tsx:3001:      await ensurePreviewSelectionBridge(path);
+src\App.tsx:3773:              {selectionMode ? "선택 중" : "선택 수정"}
+src\App.tsx:3800:                  src={previewFrameSrc(preview.url, selectionMode)}
+src\App.tsx:3803:                    selectionMode && "ring-4 ring-[var(--focus-ring)] ring-inset",
+src\App.tsx:4115:              variant={selectionMode ? "primary" : "ghost"}
+src\App.tsx:4157:                src={previewFrameSrc(preview.url, selectionMode)}
+src\App.tsx:4160:                  selectionMode && "ring-4 ring-[var(--focus-ring)]",
+src\App.tsx:4178:                        <p className="text-sm font-semibold text-[var(--primary)]">composer</p>
+src\App.tsx:4543:            <Badge tone={selectedAnchorId ? "lime" : selectionMode ? "cyan" : "steel"}>{selectedAnchorLabel}</Badge>
+src\App.tsx:4555:                variant={selectionMode ? "primary" : "secondary"}
+src\App.tsx:4561:                {selectionMode ? "선택 중" : "클릭 선택"}
+1014:  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+1017:  const [componentEdit, setComponentEdit] = useState("");
+3107:    const targetedAnchorId = anchorFromRequest(effectiveRequest) || selectedAnchorId || previewSelection?.anchorId || "";
+3115:          const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+3126:        const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+3129:            ? buildTargetedComponentRequest(targetedAnchorId, screenLabel, effectiveRequest, previewSelection)
+3587:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+3588:    const selectedText = previewSelection?.text.trim() || "";
+3591:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+3605:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+3607:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+3616:        applyAnchoredClassAdjustment(source, anchorId, previewSelection, (className) =>
+3622:  async function runComponentEdit() {
+3623:    const note = componentEdit.trim();
+3624:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+3628:    const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+3637:    const request = buildTargetedComponentRequest(anchorId, screenLabel, note, previewSelection);
+3910:                {selectedAnchor || previewSelection ? (
+3913:                      <span className="font-medium text-[var(--ink)]">selection-ready preview</span>
+3916:                    <p className="mt-1 truncate font-mono">{previewSelection?.path?.at(-1) || previewSelection?.tagName || selectedAnchor?.screenLabel || "anchor fallback"}</p>
+3917:                    {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+4595:            {selectedAnchor || previewSelection ? (
+4598:                  <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
+4599:                  <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
+4601:                {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+4602:                {previewSelection?.path?.length ? <p className="mt-1 truncate font-mono">{previewSelection.path[previewSelection.path.length - 1]}</p> : null}
+4609:                <Badge tone={previewSelection?.text ? "lime" : selectedAnchorId ? "cyan" : "steel"}>
+4610:                  {previewSelection?.text ? "텍스트 선택" : selectedAnchorId ? "앵커 선택" : "대기"}
+4618:                disabled={busy || !previewSelection?.text}
+4625:                  disabled={busy || !previewSelection?.text || !selectedTextDraft.trim() || selectedTextDraft.trim() === previewSelection.text.trim()}
+4669:              value={componentEdit}
+4678:              onClick={() => void runComponentEdit()}
+4679:              disabled={busy || !selectedAnchorId || !componentEdit.trim()}

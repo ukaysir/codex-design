@@ -1,0 +1,124 @@
+STOP_HOOK_VERIFICATION_2_RERUN
+2026-07-07T20:21:07+09:00
+PWD=/c/Users/CKIRUser/Downloads/codex-design-main/codex-design-main
+
+A) exact task-03 rg
+src/App.tsx:2395:  async function startPreviewSafely() {
+src/App.tsx:2432:  async function verifyWorkspace(path: string) {
+src/App.tsx:2697:      const result = await verifyWorkspace(path);
+src/App.tsx:2717:  async function runManualRepair() {
+src/App.tsx:2747:  async function runManualCapture() {
+src/App.tsx:2787:  async function runManualCritique() {
+src/App.tsx:2855:  async function runManualQualityAudit() {
+src/App.tsx:2941:  async function runManualExport() {
+src/App.tsx:3760:              onClick={() => void startPreviewSafely()}
+src/App.tsx:3814:                    <Button className="mt-6" variant="primary" onClick={() => void startPreviewSafely()} disabled={busy || !workspacePath}>
+src/App.tsx:4099:              onClick={() => void startPreviewSafely()}
+src/App.tsx:4735:              onClick={() => void runManualRepair()}
+src/App.tsx:4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+src/App.tsx:4745:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+src/App.tsx:4749:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+src/App.tsx:4753:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+
+B) exact task-03 node block check
+PASS: runDesignRequest excludes default preview/runtime/manual checks and preview bridge setup
+
+C) manual critique/quality function block check
+PASS: runManualCritique uses existing artifacts only and does not auto-capture/auto-verify
+PASS: runManualQualityAudit uses existing artifacts only and does not auto-capture/auto-verify
+
+D) selection/composer/3-pane evidence
+342:function previewFrameSrc(url: string, selectionMode: boolean) {
+1014:  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+1017:  const [componentEdit, setComponentEdit] = useState("");
+1732:  async function ensurePreviewSelectionBridge(path: string) {
+2381:    await ensurePreviewSelectionBridge(path);
+3001:      await ensurePreviewSelectionBridge(path);
+3107:    const targetedAnchorId = anchorFromRequest(effectiveRequest) || selectedAnchorId || previewSelection?.anchorId || "";
+3115:          const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+3126:        const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+3129:            ? buildTargetedComponentRequest(targetedAnchorId, screenLabel, effectiveRequest, previewSelection)
+3587:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+3588:    const selectedText = previewSelection?.text.trim() || "";
+3591:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+3605:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+3607:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+3616:        applyAnchoredClassAdjustment(source, anchorId, previewSelection, (className) =>
+3622:  async function runComponentEdit() {
+3623:    const note = componentEdit.trim();
+3624:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+3628:    const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+3637:    const request = buildTargetedComponentRequest(anchorId, screenLabel, note, previewSelection);
+3800:                  src={previewFrameSrc(preview.url, selectionMode)}
+3831:      className="relative grid h-screen min-w-0 grid-cols-1 grid-rows-[minmax(280px,42dvh)_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--ink)] lg:min-w-[1180px] lg:grid-cols-[320px_minmax(0,1fr)_380px] lg:grid-rows-none"
+3902:              <div data-comment-anchor="hero" className="sticky bottom-0 z-10 rounded-xl border border-[var(--line)] bg-white p-2.5 shadow-[0_6px_18px_rgba(31,41,55,0.05)]">
+3910:                {selectedAnchor || previewSelection ? (
+3913:                      <span className="font-medium text-[var(--ink)]">selection-ready preview</span>
+3916:                    <p className="mt-1 truncate font-mono">{previewSelection?.path?.at(-1) || previewSelection?.tagName || selectedAnchor?.screenLabel || "anchor fallback"}</p>
+3917:                    {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+3922:                      <span className="font-medium text-[var(--ink)]">anchor fallback</span>
+4157:                src={previewFrameSrc(preview.url, selectionMode)}
+4595:            {selectedAnchor || previewSelection ? (
+4598:                  <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
+4599:                  <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
+4601:                {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+4602:                {previewSelection?.path?.length ? <p className="mt-1 truncate font-mono">{previewSelection.path[previewSelection.path.length - 1]}</p> : null}
+4609:                <Badge tone={previewSelection?.text ? "lime" : selectedAnchorId ? "cyan" : "steel"}>
+4610:                  {previewSelection?.text ? "텍스트 선택" : selectedAnchorId ? "앵커 선택" : "대기"}
+4618:                disabled={busy || !previewSelection?.text}
+4625:                  disabled={busy || !previewSelection?.text || !selectedTextDraft.trim() || selectedTextDraft.trim() === previewSelection.text.trim()}
+4669:              value={componentEdit}
+4678:              onClick={() => void runComponentEdit()}
+4679:              disabled={busy || !selectedAnchorId || !componentEdit.trim()}
+
+E) manual controls evidence
+2690:  async function runManualVerify() {
+2697:      const result = await verifyWorkspace(path);
+2717:  async function runManualRepair() {
+2747:  async function runManualCapture() {
+2757:        const consoleCapture = await captureConsole(path, preview.url);
+2766:        const screenshotCapture = await captureScreenshot(path, preview.url);
+2787:  async function runManualCritique() {
+2855:  async function runManualQualityAudit() {
+2941:  async function runManualExport() {
+4728:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualVerify()} disabled={busy || !workspacePath}>
+4735:              onClick={() => void runManualRepair()}
+4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+4745:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+4749:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+4753:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+NOTE: await verifyWorkspace/captureConsole/captureScreenshot matches are confined to explicit runManualVerify/runManualCapture controls, not critique/quality/default design.
+
+F) imagegen clean
+PASS: no imagegen refs in src/App.tsx/src/lib
+
+G) evidence artifact sizes
+-rw-r--r-- 1 CKIRUser 197121    0  7월  7 20:21 .omo/evidence/stop-hook-build-2.txt
+-rw-r--r-- 1 CKIRUser 197121 1583  7월  7 20:17 .omo/evidence/task-03-design-only-pipeline.txt
+-rw-r--r-- 1 CKIRUser 197121  768  7월  7 20:17 .omo/evidence/task-07-3pane-ui.txt
+-rw-r--r-- 1 CKIRUser 197121 4593  7월  7 20:15 .omo/evidence/task-08-selection-composer.txt
+-rw-r--r-- 1 CKIRUser 197121 1599  7월  7 20:16 .omo/evidence/task-09-manual-tools.txt
+
+H) post-build final artifact check
+-rw-r--r-- 1 CKIRUser 197121  690  7월  7 20:21 .omo/evidence/stop-hook-build-2.txt
+-rw-r--r-- 1 CKIRUser 197121 8311  7월  7 20:21 .omo/evidence/stop-hook-verification-2.txt
+
+I) stop-hook-build-2 tail
+> designforge@0.1.0 build
+> node ./scripts/build.mjs
+
+[36mvite v8.1.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 1780 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                     0.39 kB │ gzip:   0.26 kB
+dist/assets/JetBrainsMono-Regular-CA-Os4ii.woff2   92.38 kB
+dist/assets/JetBrainsMono-Medium-DoKWA_AF.woff2    94.28 kB
+dist/assets/JetBrainsMono-Bold-CUogYd9I.woff2      94.62 kB
+dist/assets/index-B6s44WQ1.css                     21.63 kB │ gzip:   5.48 kB
+dist/assets/index-psipWlcy.js                     346.50 kB │ gzip: 104.31 kB
+
+[32m✓ built in 1.22s[39m
+BUILD_EXIT: 0
+
+FINAL_VERIFICATION_EXIT: 0

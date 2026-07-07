@@ -5,7 +5,6 @@ import {
   FileText,
   FolderOpen,
   History,
-  Image as ImageIcon,
   Loader2,
   Maximize2,
   MessageCircle,
@@ -29,7 +28,6 @@ import {
   buildCritiquePrompt,
   buildDesignClarificationPrompt,
   buildDesignSystemSeed,
-  buildImageGenerationPrompt,
   buildQualityAuditPrompt,
   buildRepairPrompt,
   buildStructuredPrompt,
@@ -48,12 +46,6 @@ import {
   isActivityMessage,
   parseChatMessageRecords,
 } from "./lib/chat-messages";
-import {
-  buildSectionImageTasks,
-  isImageGenerationRequest,
-  isMultiSectionImageRequest,
-  shouldApplyGeneratedImagesToScreen,
-} from "./lib/image-generation";
 import { callTauri } from "./lib/tauri";
 import { WORKSPACE_SELECTION_APP_TSX } from "./lib/workspace-bridge";
 import type {
@@ -115,7 +107,6 @@ const CLARIFICATION_PATH = ".designforge/clarification.json";
 const QUALITY_AUDIT_PATH = ".designforge/quality-audit.json";
 const PROMPT_PATH = "prompts/latest.md";
 const CLARIFICATION_PROMPT_PATH = "prompts/clarification-latest.md";
-const IMAGE_PROMPT_PATH = "prompts/image-latest.md";
 const REPAIR_PROMPT_PATH = "prompts/repair-latest.md";
 const CRITIQUE_PROMPT_PATH = "prompts/critique-latest.md";
 const QUALITY_PROMPT_PATH = "prompts/quality-latest.md";
@@ -127,8 +118,6 @@ const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
 const COMMENTS_PATH = ".designforge/comments.jsonl";
 const ATTACHMENTS_MANIFEST_PATH = ".designforge/attachments.json";
 const ATTACHMENTS_DIR = ".designforge/attachments";
-const GENERATED_IMAGES_PATH = ".designforge/generated-images.json";
-const GENERATED_IMAGES_DIR = "assets/generated";
 const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
 const CONSOLE_PATH = "outputs/console/latest.json";
 const ARTIFACT_VIEWPORT_WIDTH = 1920;
@@ -583,7 +572,7 @@ function inferPurposeAssumption(request: string) {
 }
 
 function isSmallRevisionRequest(request: string, hasTarget: boolean, hasAttachments: boolean) {
-  if (hasAttachments || isImageGenerationRequest(request)) return false;
+  if (hasAttachments) return false;
   if (request.length > 360) return false;
   const asksForNewWork = /(새로|처음부터|new\s+screen|fresh|reset|replace\s+the\s+whole|리디자인|전체\s*교체|랜딩|페이지\s*만들|앱\s*만들|사이트\s*만들)/i.test(request);
   if (asksForNewWork) return false;
@@ -1067,7 +1056,6 @@ export default function App() {
             QUALITY_AUDIT_PATH,
             CLARIFICATION_PROMPT_PATH,
             PROMPT_PATH,
-            IMAGE_PROMPT_PATH,
             REPAIR_PROMPT_PATH,
             CRITIQUE_PROMPT_PATH,
             QUALITY_PROMPT_PATH,
@@ -1079,12 +1067,10 @@ export default function App() {
             CONSOLE_PATH,
             PREVIEW_MANIFEST_PATH,
             COMMENTS_PATH,
-            GENERATED_IMAGES_PATH,
             ARTIFACT_PATH,
             "designforge.config.json",
           ].includes(file.relativePath) ||
           file.relativePath === "CODEX_DESIGN.md" ||
-          file.relativePath.startsWith(`${GENERATED_IMAGES_DIR}/`) ||
           file.relativePath === "src/styles.css",
         ),
     [files],
@@ -2229,21 +2215,6 @@ export default function App() {
     return prompt;
   }
 
-  async function writeImageGenerationPrompt(path: string, request: string, context: DesignContextManifest) {
-    const prompt = buildImageGenerationPrompt(request, {
-      contextPath: CONTEXT_PATH,
-      designSystemPath: "DESIGN.md",
-      contextSummary: formatContextForPrompt(context),
-    });
-    await callTauri("write_file", {
-      workspacePath: path,
-      relativePath: IMAGE_PROMPT_PATH,
-      content: prompt,
-    });
-    pushLog("success", `Compiled ${IMAGE_PROMPT_PATH}.`);
-    return prompt;
-  }
-
   async function writeClarificationPrompt(
     path: string,
     request: string,
@@ -2711,7 +2682,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
 
   async function ensureActionWorkspace() {
     const path = workspacePath || (await ensureWorkspace());
-    await ensurePreviewSelectionBridge(path);
     await loadChatHistory(path);
     await loadActivityHistory(path);
     return path;
@@ -2822,32 +2792,8 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       const path = await ensureActionWorkspace();
       await appendChatMessage(path, "assistant", "사용자 요청으로 스크린샷 기반 크리틱 패스를 시작합니다.", "tool", "info");
 
-      let consoleInfo = manualConsoleInfo;
-      let screenshot = manualScreenshotInfo;
-
-      if (preview?.url && !consoleInfo) {
-        setStep("console", "active");
-        try {
-          consoleInfo = await captureConsole(path, preview.url);
-          setManualConsoleInfo(consoleInfo);
-          setStep("console", "done");
-        } catch (error) {
-          setStep("console", "error");
-          pushLog("error", `Console capture unavailable before critique: ${textFromError(error)}`);
-        }
-      }
-
-      if (preview?.url && !screenshot) {
-        setStep("screenshot", "active");
-        try {
-          screenshot = await captureScreenshot(path, preview.url);
-          setManualScreenshotInfo(screenshot);
-          setStep("screenshot", "done");
-        } catch (error) {
-          setStep("screenshot", "error");
-          pushLog("error", `Screenshot unavailable before critique: ${textFromError(error)}`);
-        }
-      }
+      const consoleInfo = manualConsoleInfo;
+      const screenshot = manualScreenshotInfo;
 
       let critique = await writeCritiquePrompt(path, latestRun?.request ?? "Manual DesignForge critique", screenshot, consoleInfo);
       setManualCritique(critique);
@@ -2856,7 +2802,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         await appendChatMessage(
           path,
           "assistant",
-          "스크린샷이 없어 크리틱 프롬프트만 준비했습니다. 미리보기를 시작하고 캡처한 뒤 다시 실행하세요.",
+          "스크린샷이 없어 크리틱 프롬프트만 준비했습니다. 미리보기 시작과 캡처 실행을 직접 누른 뒤 다시 실행하세요.",
           "tool",
           "error",
         );
@@ -2872,15 +2818,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         });
         await runCodexPrompt(path, critiquePrompt, "Codex critique");
 
-        setStep("verify", "active");
-        const verifyResult = await verifyWorkspace(path);
-        setManualVerifyResult(verifyResult);
-        if (!verifyResult.success) {
-          setStep("verify", "error");
-          throw new Error("Critique pass broke workspace verification.");
-        }
-        setStep("verify", "done");
-
         critique = { ...critique, status: "applied", updatedAt: new Date().toISOString() };
         await saveCritiqueManifest(path, critique);
         setManualCritique(critique);
@@ -2890,7 +2827,7 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         await writeStaticCheckManifest(path);
         await refreshFiles(path);
         setStep("critique", "done");
-        await appendChatMessage(path, "assistant", "크리틱 패스를 적용했고 검증까지 통과했습니다.", "tool", "success");
+        await appendChatMessage(path, "assistant", "크리틱 패스를 적용했습니다. 검증은 자동 실행하지 않았습니다. 필요하면 검증 실행을 누르세요.", "tool", "success");
       } catch (error) {
         await restoreGeneratedFiles(path, snapshot);
         critique = {
@@ -2923,34 +2860,25 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       const path = await ensureActionWorkspace();
       await appendChatMessage(path, "assistant", "사용자 요청으로 디자인 품질 검사를 시작합니다.", "tool", "info");
 
-      let consoleInfo = manualConsoleInfo;
-      let screenshot = manualScreenshotInfo;
-
-      if (preview?.url && !consoleInfo) {
-        setStep("console", "active");
-        try {
-          consoleInfo = await captureConsole(path, preview.url);
-          setManualConsoleInfo(consoleInfo);
-          setStep("console", "done");
-        } catch (error) {
-          setStep("console", "error");
-          pushLog("error", `Console capture unavailable before quality audit: ${textFromError(error)}`);
-        }
-      }
-
-      if (preview?.url && !screenshot) {
-        setStep("screenshot", "active");
-        try {
-          screenshot = await captureScreenshot(path, preview.url);
-          setManualScreenshotInfo(screenshot);
-          setStep("screenshot", "done");
-        } catch (error) {
-          setStep("screenshot", "error");
-          pushLog("error", `Screenshot unavailable before quality audit: ${textFromError(error)}`);
-        }
-      }
+      const consoleInfo = manualConsoleInfo;
+      const screenshot = manualScreenshotInfo;
 
       let audit = await writeQualityAuditPrompt(path, latestRun?.request ?? "Manual DesignForge quality audit", screenshot, consoleInfo);
+      setManualQualityAudit(audit);
+      if (!screenshot) {
+        setStep("quality", "error");
+        await saveQualityAuditManifest(path, audit);
+        await appendChatMessage(
+          path,
+          "assistant",
+          "스크린샷이 없어 품질 검사 프롬프트만 준비했습니다. 미리보기 시작과 캡처 실행을 직접 누른 뒤 다시 실행하세요.",
+          "tool",
+          "error",
+        );
+        await refreshFiles(path);
+        return;
+      }
+
       const snapshot = await snapshotGeneratedFiles(path);
 
       try {
@@ -2960,15 +2888,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         });
         await runCodexPrompt(path, qualityPrompt, "Codex quality audit");
 
-        setStep("verify", "active");
-        const verifyResult = await verifyWorkspace(path);
-        setManualVerifyResult(verifyResult);
-        if (!verifyResult.success) {
-          setStep("verify", "error");
-          throw new Error("Quality audit pass broke workspace verification.");
-        }
-        setStep("verify", "done");
-
         try {
           const authored = await readQualityAuditManifest(path);
           audit = {
@@ -2976,10 +2895,10 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
             ...authored,
             status: authored.status === "failed" ? "failed" : authored.status === "no-change" ? "no-change" : "applied",
             updatedAt: new Date().toISOString(),
-            verificationPassed: true,
+            verificationPassed: false,
           };
         } catch {
-          audit = { ...audit, status: "applied", updatedAt: new Date().toISOString(), verificationPassed: true };
+          audit = { ...audit, status: "applied", updatedAt: new Date().toISOString(), verificationPassed: false };
         }
         await saveQualityAuditManifest(path, audit);
         await refreshFiles(path);
@@ -2988,7 +2907,13 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
         await writeStaticCheckManifest(path);
         await refreshFiles(path);
         setStep("quality", audit.status === "failed" ? "error" : "done");
-        await appendChatMessage(path, "assistant", `품질 검사가 완료됐습니다. status=${audit.status}.`, "tool", "success");
+        await appendChatMessage(
+          path,
+          "assistant",
+          `품질 검사가 완료됐습니다. status=${audit.status}. 검증은 자동 실행하지 않았습니다. 필요하면 검증 실행을 누르세요.`,
+          "tool",
+          "success",
+        );
       } catch (error) {
         await restoreGeneratedFiles(path, snapshot);
         audit = {
@@ -3061,266 +2986,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
       setStep("export", "error");
       pushLog("error", message);
       if (workspacePath) await appendChatMessage(workspacePath, "assistant", `export 생성 중단: ${message}`, "tool", "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function listGeneratedImageFiles(path: string) {
-    const workspaceFiles = await callTauri<WorkspaceFile[]>("list_workspace_files", { workspacePath: path });
-    return workspaceFiles
-      .filter((file) => !file.isDirectory && file.relativePath.startsWith(`${GENERATED_IMAGES_DIR}/`) && /\.(png|jpe?g|webp|gif|avif)$/i.test(file.relativePath))
-      .map((file) => file.relativePath)
-      .sort();
-  }
-
-  async function runImageGenerationRequest(rawRequest: string, options: Pick<RunRequestOptions, "attachments" | "displayRequest" | "recordRequest"> = {}) {
-    const request = rawRequest.trim();
-    if (!request || busy) return;
-
-    setInput("");
-    setChatPanelTab("conversation");
-    setBusy(true);
-    setSteps(START_STEPS);
-    setManualVerifyResult(null);
-    setManualConsoleInfo(null);
-    setManualScreenshotInfo(null);
-    setManualCritique(null);
-    setManualQualityAudit(null);
-    setManualExportPath("");
-    const attachments = options.attachments ?? [];
-    const requestForCodex = requestWithAttachments(request, attachments);
-    const displayRequest = options.displayRequest ?? request;
-    const recordRequest = options.recordRequest ?? displayRequest;
-    const startedAt = new Date().toISOString();
-    let path = "";
-    let lastResult: CommandResult | null = null;
-    let placementResult: CommandResult | null = null;
-    let imageTaskResults: Array<{ id: string; label: string; files: string[]; error?: string }> = [];
-
-    try {
-      setStep("context", "active");
-      path = await ensureWorkspace(recordRequest);
-      await ensurePreviewSelectionBridge(path);
-      await refreshFiles(path);
-      await loadRunHistory(path);
-      await loadCodexSession(path);
-      await loadChatHistory(path);
-      await loadActivityHistory(path);
-      await appendChatMessage(path, "user", displayRequest, "chat", undefined, attachments);
-      const existingAnchorManifest = isMultiSectionImageRequest(request)
-        ? (await loadAnchorManifest(path)) ?? (await writeAnchorManifest(path).catch(() => null))
-        : null;
-      const imageTasks = isMultiSectionImageRequest(request)
-        ? buildSectionImageTasks(requestForCodex, existingAnchorManifest?.anchors ?? [], GENERATED_IMAGES_DIR)
-        : [{ id: "image", label: "requested image", prompt: requestForCodex }];
-      await appendAgentMessage(path, {
-        runId: crypto.randomUUID(),
-        phase: "image-plan",
-        title: isMultiSectionImageRequest(request) ? "섹션별 이미지 작업으로 나눴습니다." : "이미지 에셋 생성을 준비합니다.",
-        status: "done",
-        details: [
-          `${imageTasks.length}개 이미지 작업`,
-          shouldApplyGeneratedImagesToScreen(request) ? "생성 후 화면 배경 적용까지 이어갑니다." : "생성된 파일만 에셋으로 저장합니다.",
-          "각 작업은 독립 이미지 생성 턴으로 실행해서 다중 요청 실패를 줄입니다.",
-        ],
-      });
-      let context = await writeDesignContextManifest(path);
-      setLatestContext(context);
-      setStep("context", "done");
-
-      setStep("codex", "active");
-      const check = await callTauri<CommandResult>("check_codex", { codexPath: settings.codexPath });
-      pushCommandResult("Codex check", check);
-      if (!check.success) throw new Error("Codex CLI is not available.");
-      const imageFilesBeforeRun = await listGeneratedImageFiles(path);
-      for (const task of imageTasks) {
-        setStep("prompt", "active");
-        const prompt = await writeImageGenerationPrompt(path, task.prompt, context);
-        await appendAgentMessage(path, {
-          runId: crypto.randomUUID(),
-          phase: "image-prompt",
-          title: `${task.label} 이미지 프롬프트를 준비했습니다.`,
-          status: "done",
-          details: [IMAGE_PROMPT_PATH, `task=${task.id}`],
-        });
-        setStep("prompt", "done");
-
-        const beforeFiles = await listGeneratedImageFiles(path);
-        try {
-          lastResult = await runCodexPrompt(path, prompt, `Codex image generation: ${task.id}`);
-          const afterFiles = await listGeneratedImageFiles(path);
-          const beforeSet = new Set(beforeFiles);
-          const newFiles = afterFiles.filter((file) => !beforeSet.has(file));
-          imageTaskResults.push({ id: task.id, label: task.label, files: newFiles });
-          await appendAgentMessage(path, {
-            runId: crypto.randomUUID(),
-            phase: "image-generate",
-            title: `${task.label} 이미지 생성 턴이 완료됐습니다.`,
-            status: newFiles.length ? "done" : "info",
-            details: newFiles.length ? newFiles : [`새 파일을 감지하지 못했습니다. ${GENERATED_IMAGES_DIR} 전체를 다시 확인합니다.`],
-          });
-        } catch (error) {
-          const taskError = textFromError(error);
-          imageTaskResults.push({ id: task.id, label: task.label, files: [], error: taskError });
-          pushLog("error", `Image task ${task.id} failed: ${taskError}`);
-          await appendAgentMessage(path, {
-            runId: crypto.randomUUID(),
-            phase: "image-generate",
-            title: `${task.label} 이미지 생성이 실패했습니다.`,
-            status: "error",
-            details: [taskError, "다른 섹션 이미지 작업은 계속 시도합니다."],
-          });
-        }
-      }
-      setStep("codex", "done");
-
-      setStep("artifact", "active");
-      await refreshFiles(path);
-      const imageFiles = await listGeneratedImageFiles(path);
-      const imageFilesBeforeRunSet = new Set(imageFilesBeforeRun);
-      const newImageFiles = imageFiles.filter((file) => !imageFilesBeforeRunSet.has(file));
-      const imageFilesForApplication = newImageFiles.length ? newImageFiles : imageFiles;
-      if (!imageFiles.length && imageTaskResults.some((task) => task.error)) {
-        throw new Error(`모든 이미지 작업이 실패했습니다: ${imageTaskResults.map((task) => task.error).filter(Boolean).join(" / ")}`);
-      }
-      await callTauri("write_file", {
-        workspacePath: path,
-        relativePath: GENERATED_IMAGES_PATH,
-        content: JSON.stringify(
-          {
-            updatedAt: new Date().toISOString(),
-            request: recordRequest,
-            promptPath: IMAGE_PROMPT_PATH,
-            imageFiles,
-            newImageFiles,
-            tasks: imageTaskResults,
-            sourcePrompt: requestForCodex,
-            notes: imageFiles.length
-              ? [`${imageFiles.length} generated image file(s) found in ${GENERATED_IMAGES_DIR}.`]
-              : [`No generated image files were detected under ${GENERATED_IMAGES_DIR}. Check Codex output for details.`],
-          },
-          null,
-          2,
-        ),
-      });
-      await refreshFiles(path);
-      setStep("artifact", "done");
-
-      if (imageFilesForApplication.length && shouldApplyGeneratedImagesToScreen(request)) {
-        setStep("design", "active");
-        await appendAgentMessage(path, {
-          runId: crypto.randomUUID(),
-          phase: "image-apply",
-          title: "생성된 이미지를 화면 배경에 적용합니다.",
-          status: "active",
-          details: imageFilesForApplication,
-          artifactPath: ARTIFACT_PATH,
-        });
-        const applyRequest = [
-          recordRequest,
-          "",
-          "Use these generated image files as actual section backgrounds in the generated screen:",
-          ...imageFilesForApplication.map((file) => `- ${file}`),
-          "",
-          "Match each image to the most appropriate section. Preserve text readability with overlays, gradients, or layout changes as needed. Do not use remote image URLs.",
-        ].join("\n");
-        const designHealth = await prepareDesignSystem(path, applyRequest);
-        context = await writeDesignContextManifest(path);
-        setLatestContext(context);
-        const brief = await writeDesignBriefManifest(path, applyRequest, designHealth, context, null);
-        setLatestBrief(brief);
-        const applyPrompt = await writePrompt(path, applyRequest, brief, context, null);
-        setStep("codex", "active");
-        placementResult = await runCodexPrompt(path, applyPrompt, "Codex image placement");
-        setStep("codex", "done");
-        setStep("artifact", "active");
-        await refreshFiles(path);
-        const anchors = await writeAnchorManifest(path);
-        setAnchorManifest(anchors);
-        const tokenManifest = await writeTokenManifest(path);
-        setLatestTokenManifest(tokenManifest);
-        const staticCheck = await writeStaticCheckManifest(path);
-        setLatestStaticCheck(staticCheck);
-        await refreshFiles(path);
-        setStep("artifact", "done");
-        setStep("design", "done");
-        await appendAgentMessage(path, {
-          runId: crypto.randomUUID(),
-          phase: "image-apply",
-          title: "섹션 배경 적용이 완료됐습니다.",
-          status: "done",
-          details: [`${ARTIFACT_PATH} 갱신`, `${ANCHORS_PATH}: ${anchors.anchors.length} anchors`, `${STATIC_CHECK_PATH}: ${staticCheck.status}`],
-          artifactPath: ARTIFACT_PATH,
-        });
-      }
-
-      const runId = crypto.randomUUID();
-      const finalResult = placementResult ?? lastResult;
-      await recordRun(path, {
-        id: runId,
-        request: recordRequest,
-        status: "success",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        promptPath: IMAGE_PROMPT_PATH,
-        artifactPath: placementResult ? ARTIFACT_PATH : GENERATED_IMAGES_DIR,
-        contextPath: CONTEXT_PATH,
-        codexExitCode: finalResult?.code ?? null,
-        codexSessionId: finalResult?.sessionId ?? codexSession?.sessionId,
-        codexUsedResume: finalResult?.usedResume,
-        stdoutPreview: finalResult?.stdout.trim().slice(0, 1000) ?? "",
-        stderrPreview: finalResult?.stderr.trim().slice(0, 1000) ?? "",
-        repairAttempts: 0,
-      });
-      await appendAgentMessage(path, {
-        runId,
-        phase: "image-result",
-        title: placementResult ? "이미지 생성과 섹션 배경 적용이 완료됐습니다." : "이미지 생성이 완료됐습니다.",
-        status: imageFiles.length ? "done" : "info",
-        details: imageFiles.length
-          ? [
-              `${imageFiles.length}개 이미지 파일`,
-              ...imageFilesForApplication,
-              imageTaskResults.some((task) => task.error) ? "일부 이미지 작업은 실패했지만 생성된 파일로 계속 진행했습니다." : "모든 이미지 작업을 처리했습니다.",
-            ]
-          : [`이미지 생성 턴은 완료됐지만 ${GENERATED_IMAGES_DIR}에서 결과 파일을 찾지 못했습니다.`],
-        artifactPath: placementResult ? ARTIFACT_PATH : GENERATED_IMAGES_DIR,
-      });
-      await refreshProjects();
-    } catch (error) {
-      const message = textFromError(error);
-      setSteps((current) => current.map((step) => (step.status === "active" ? { ...step, status: "error" } : step)));
-      pushLog("error", message);
-      if (path) {
-        const runId = crypto.randomUUID();
-        await recordRun(path, {
-          id: runId,
-          request: recordRequest,
-          status: "error",
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          promptPath: IMAGE_PROMPT_PATH,
-          artifactPath: GENERATED_IMAGES_DIR,
-          contextPath: CONTEXT_PATH,
-          codexExitCode: (placementResult ?? lastResult)?.code ?? null,
-          codexSessionId: (placementResult ?? lastResult)?.sessionId ?? codexSession?.sessionId,
-          codexUsedResume: (placementResult ?? lastResult)?.usedResume,
-          stdoutPreview: (placementResult ?? lastResult)?.stdout.trim().slice(0, 1000) ?? "",
-          stderrPreview: (placementResult ?? lastResult)?.stderr.trim().slice(0, 1000) ?? "",
-          repairAttempts: 0,
-          error: message,
-        });
-        await appendAgentMessage(path, {
-          runId: crypto.randomUUID(),
-          phase: "image-error",
-          title: "이미지 생성이 중단됐습니다.",
-          status: "error",
-          details: [message, imageTaskResults.length ? `${imageTaskResults.length}개 작업 중 ${imageTaskResults.filter((task) => task.error).length}개 실패` : "작업 결과 없음"],
-        });
-      } else {
-        pushMessage("assistant", `이미지 생성이 중단됐습니다: ${message}`, "summary", "error");
-      }
     } finally {
       setBusy(false);
     }
@@ -3443,11 +3108,6 @@ ${consoleInfo ? `- ${consoleInfo.relativePath}` : ""}
 
     if (!guidedDraft) {
       setPendingAttachments([]);
-      if (isImageGenerationRequest(effectiveRequest)) {
-        await runImageGenerationRequest(effectiveRequest, { attachments });
-        return;
-      }
-
       if (targetedAnchorId) {
         const directReplacement = parseDirectReplacement(effectiveRequest);
         if (directReplacement) {
@@ -3563,7 +3223,6 @@ ${effectiveRequest}`;
     try {
       setStep("context", "active");
       path = await ensureWorkspace(recordRequest);
-      await ensurePreviewSelectionBridge(path);
       await refreshFiles(path);
       await loadRunHistory(path);
       await loadCodexSession(path);
@@ -4169,11 +3828,11 @@ ${effectiveRequest}`;
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="relative grid h-screen min-w-[1180px] grid-cols-[320px_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--ink)]"
+      className="relative grid h-screen min-w-0 grid-cols-1 grid-rows-[minmax(280px,42dvh)_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--ink)] lg:min-w-[1180px] lg:grid-cols-[320px_minmax(0,1fr)_380px] lg:grid-rows-none"
     >
       <aside
         data-comment-anchor="navigation"
-        className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)] bg-[#fbfaf7] px-4 py-3"
+        className="flex min-h-0 flex-col overflow-y-auto border-b border-[var(--line)] bg-[#fbfaf7] px-4 py-3 lg:border-b-0 lg:border-r"
       >
         <header className="flex min-h-10 items-center justify-between">
           <div className="flex min-w-0 items-center gap-2">
@@ -4240,11 +3899,30 @@ ${effectiveRequest}`;
                 </div>
               </div>
 
-              <div data-comment-anchor="hero" className="rounded-xl border border-[var(--line)] bg-white p-2.5 shadow-[0_6px_18px_rgba(31,41,55,0.05)]">
+              <div data-comment-anchor="hero" className="sticky bottom-0 z-10 rounded-xl border border-[var(--line)] bg-white p-2.5 shadow-[0_6px_18px_rgba(31,41,55,0.05)]">
                 {guidedDraft ? (
                   <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--charcoal)]">
                     <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
                     <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
+                  </div>
+                ) : null}
+
+                {selectedAnchor || previewSelection ? (
+                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--muted)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-[var(--ink)]">selection-ready preview</span>
+                      <Badge tone="lime">{selectedAnchorLabel}</Badge>
+                    </div>
+                    <p className="mt-1 truncate font-mono">{previewSelection?.path?.at(-1) || previewSelection?.tagName || selectedAnchor?.screenLabel || "anchor fallback"}</p>
+                    {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+                  </div>
+                ) : anchors.length ? (
+                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--muted)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-[var(--ink)]">anchor fallback</span>
+                      <Badge tone="steel">{anchors.length} anchors</Badge>
+                    </div>
+                    <p className="mt-1 truncate font-mono">{anchors.slice(0, 3).map((anchor) => `@${anchor.id}`).join(" · ")}</p>
                   </div>
                 ) : null}
 
@@ -4304,23 +3982,6 @@ ${effectiveRequest}`;
                       }}
                       disabled={busy}
                     />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="h-8 min-h-8 w-12 shrink-0 gap-1 bg-[var(--panel-2)] px-1 text-[var(--primary-strong)]"
-                      onClick={() => {
-                        const imageRequest = input.trim() || "DesignForge에서 사용할 이미지를 생성하세요.";
-                        const attachments = pendingAttachments;
-                        setPendingAttachments([]);
-                        void runImageGenerationRequest(imageRequest, { attachments });
-                      }}
-                      disabled={busy}
-                      title="Codex $imagegen으로 이미지 에셋을 생성합니다."
-                      aria-label="이미지 생성"
-                    >
-                      <ImageIcon size={13} strokeWidth={2.6} />
-                      <span className="text-[10px] font-bold leading-none">AI</span>
-                    </Button>
                     <Button
                       type="button"
                       variant="secondary"
@@ -4693,18 +4354,25 @@ ${effectiveRequest}`;
         </>
       ) : null}
 
-      {showPipelinePanel ? (
-        <>
+      <>
+        {showPipelinePanel ? (
           <button
             type="button"
-            className="fixed inset-0 z-20 bg-slate-900/10"
+            className="fixed inset-0 z-20 bg-slate-900/10 lg:hidden"
             aria-label="작업 파이프라인 닫기"
             onClick={() => setShowPipelinePanel(false)}
           />
-          <aside
-            data-comment-anchor="pipeline-status"
-            className="fixed bottom-16 right-4 top-4 z-30 flex w-[380px] min-h-0 flex-col overflow-y-auto rounded-[28px] border border-[var(--line)] bg-[var(--panel-dark)] px-5 py-6 shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
-          >
+        ) : null}
+        <aside
+          data-comment-anchor="pipeline-status"
+          className={cn(
+            "min-h-0 flex-col overflow-y-auto border border-[var(--line)] bg-[var(--panel-dark)] px-5 py-6",
+            showPipelinePanel
+              ? "fixed bottom-16 right-4 top-4 z-30 flex w-[min(380px,calc(100vw-2rem))] rounded-[28px] shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
+              : "hidden",
+            "lg:static lg:z-auto lg:flex lg:w-auto lg:rounded-none lg:border-y-0 lg:border-r-0 lg:px-4 lg:shadow-none",
+          )}
+        >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-[var(--ink-strong)]">작업 파이프라인</h2>
           <div className="flex items-center gap-2">
@@ -4713,7 +4381,7 @@ ${effectiveRequest}`;
             </Badge>
             <Button
               variant="ghost"
-              className="min-h-8 px-3 text-xs"
+              className="min-h-8 px-3 text-xs lg:hidden"
               onClick={() => setShowPipelinePanel(false)}
               aria-label="작업 파이프라인 닫기"
             >
@@ -5132,8 +4800,7 @@ ${effectiveRequest}`;
           </div>
         </section>
           </aside>
-        </>
-      ) : null}
+      </>
 
     </div>
   );

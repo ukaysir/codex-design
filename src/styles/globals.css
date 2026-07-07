@@ -2,37 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --canvas: #ffffff;
-  --panel: #ffffff;
-  --panel-dark: #f8fafc;
-  --panel-2: #f6f7f9;
-  --panel-3: #eef2f7;
-  --line: #e8edf3;
-  --line-strong: #d7e0ea;
-  --ink: #1f2937;
-  --ink-strong: #111827;
-  --charcoal: #43556b;
-  --muted: #667891;
-  --mute: #9aa8b8;
-  --primary: #3182f6;
-  --primary-strong: #1b64da;
-  --on-primary: #ffffff;
-  --accent: #3182f6;
-  --focus-ring: rgba(49, 130, 246, 0.26);
-  --surface-dark: #152033;
-  --on-dark: #ffffff;
-  --on-dark-muted: rgba(255, 255, 255, 0.72);
-  --warning: #fcd34d;
-  --danger: #dc2626;
+  --bg: #fdfcfc;
+  --canvas: #fdfcfc;
+  --panel: #fdfcfc;
+  --panel-dark: #201d1d;
+  --panel-2: #f8f7f7;
+  --panel-3: #f1eeee;
+  --line: rgba(15, 0, 0, 0.12);
+  --line-strong: #646262;
+  --ink: #201d1d;
+  --ink-strong: #0f0000;
+  --charcoal: #302c2c;
+  --muted: #646262;
+  --mute: #9a9898;
+  --primary: #201d1d;
+  --primary-strong: #0f0000;
+  --on-primary: #fdfcfc;
+  --accent: #007aff;
+  --focus-ring: rgba(15, 0, 0, 0.24);
+  --surface-dark: #201d1d;
+  --surface-dark-elevated: #302c2c;
+  --on-dark: #fdfcfc;
+  --on-dark-muted: rgba(253, 252, 252, 0.68);
+  --warning: #ff9f0a;
+  --danger: #ff3b30;
+  --success: #30d158;
   --terminal-red: #ff5f56;
   --terminal-yellow: #ffbd2e;
   --terminal-green: #27c93f;
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
   font-family:
-    "SF Pro Rounded", "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", ui-rounded, ui-sans-serif, system-ui,
-    -apple-system, BlinkMacSystemFont, sans-serif;
+    "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 16px;
+  line-height: 1.5;
   background: var(--bg);
   color: var(--ink);
 }
@@ -78,7 +118,7 @@ textarea {
 
 ::-webkit-scrollbar-thumb {
   background: var(--line-strong);
-  border-radius: 9999px;
+  border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar-track {

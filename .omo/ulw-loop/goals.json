@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "createdAt": "2026-07-07T10:15:55.260Z",
+  "updatedAt": "2026-07-07T10:16:33.472Z",
+  "briefPath": ".omo/ulw-loop/brief.md",
+  "goalsPath": ".omo/ulw-loop/goals.json",
+  "ledgerPath": ".omo/ulw-loop/ledger.jsonl",
+  "codexGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-implement-the-approved-codex-design",
+      "title": "Implement the approved codex-design workflow redesign plan as five de...",
+      "objective": "Implement the approved codex-design workflow redesign plan as five delivery goals: 1 remove the current image generation feature from active code and UI while preserving normal image attachments; 2 make normal DesignForge design requests design-only with no automatic preview, capture, runtime test, package install, npm run typecheck, or tsc --noEmit, and update prompt/copy plus preview/verify missing-dependency behavior; 3 create DESIGN.md and redesign the app as a JetBrains Mono OpenCode-style dense 3-pane workbench with fixed composer and no image generation controls; 4 add selection-ready preview and composer-linked component editing while keeping runtime tools explicit manual actions only; 5 write the embedded ima2-gen-inspired Image Workspace architecture contract and run final build, Rust check, rg regression checks, and browser visual QA evidence. Use .omo/plans/codex-design-workflow-redesign.md as the execution source of truth. This is HEAVY work.",
+      "status": "in_progress",
+      "successCriteria": [
+        {
+          "id": "C001",
+          "scenario": "CLI/data proof: after implementation run rg checks proving imagegen active paths are gone and default workflow/runtime install paths are separated; run npm run build and cargo check. PASS iff commands exit 0 and forbidden active references are absent or documented as manual-only.",
+          "userModel": "happy",
+          "expectedEvidence": ".omo/evidence/task-11-final-qa.txt plus .omo/evidence/task-02-image-removal.txt, task-03-design-only-pipeline.txt, task-04-no-auto-install.txt, task-05-prompt-contract.txt",
+          "essential": true,
+          "capturedEvidence": null,
+          "status": "pending"
+        },
+        {
+          "id": "C002",
+          "scenario": "Browser proof: start DesignForge frontend with npm run dev -- --host 127.0.0.1 --port 1420, open http://127.0.0.1:1420 at 1440x900 and 390x844, capture screenshots. PASS iff UI is JetBrains/OpenCode dense 3-pane on desktop, usable collapsed layout on mobile, fixed composer visible, no image generation controls, no text overlap.",
+          "userModel": "edge",
+          "expectedEvidence": ".omo/evidence/task-07-3pane-ui.txt, task-08-selection-composer.txt, screenshots under .omo/evidence/",
+          "essential": true,
+          "capturedEvidence": null,
+          "status": "pending"
+        },
+        {
+          "id": "C003",
+          "scenario": "Regression/docs proof: inspect final diff and evidence showing normal image attachments still work, runtime tools are explicit manual actions only, and docs/image-workspace-architecture.md defines an embedded ima2-gen-inspired future image workspace without exposed disabled UI. PASS iff evidence files and rg checks prove these constraints.",
+          "userModel": "regression",
+          "expectedEvidence": ".omo/evidence/task-09-manual-tools.txt and .omo/evidence/task-10-image-workspace-contract.txt plus final reviewer approval artifact",
+          "essential": false,
+          "capturedEvidence": null,
+          "status": "pending"
+        }
+      ],
+      "attempt": 1,
+      "createdAt": "2026-07-07T10:15:55.260Z",
+      "updatedAt": "2026-07-07T10:16:33.472Z",
+      "startedAt": "2026-07-07T10:16:33.472Z"
+    }
+  ],
+  "codexObjective": "Complete the durable ulw-loop plan in .omo/ulw-loop/goals.json, including later accepted/appended stories, under the original brief constraints; use .omo/ulw-loop/ledger.jsonl as the audit trail.",
+  "activeGoalId": "G001-implement-the-approved-codex-design"
+}

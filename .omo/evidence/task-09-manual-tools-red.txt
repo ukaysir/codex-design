@@ -1,0 +1,9 @@
+2698:      const result = await verifyWorkspace(path);
+2758:        const consoleCapture = await captureConsole(path, preview.url);
+2767:        const screenshotCapture = await captureScreenshot(path, preview.url);
+2802:          consoleInfo = await captureConsole(path, preview.url);
+2814:          screenshot = await captureScreenshot(path, preview.url);
+2847:        const verifyResult = await verifyWorkspace(path);
+2903:          consoleInfo = await captureConsole(path, preview.url);
+2915:          screenshot = await captureScreenshot(path, preview.url);
+2935:        const verifyResult = await verifyWorkspace(path);

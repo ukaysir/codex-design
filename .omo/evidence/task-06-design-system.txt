@@ -1,0 +1,106 @@
+96 matches in 7 files:
+
+DESIGN.md:13:| Surface/page | `--bg` | `#fdfcfc` | `#201d1d` | App body and primary canvas |
+DESIGN.md:14:| Surface/canvas | `--canvas` | `#fdfcfc` | `#201d1d` | Main work area |
+DESIGN.md:15:| Surface/panel | `--panel` | `#fdfcfc` | `#302c2c` | Primary panels |
+DESIGN.md:16:| Surface/soft | `--panel-2` | `#f8f7f7` | `#302c2c` | Secondary rows, inputs |
+DESIGN.md:17:| Surface/card | `--panel-3` | `#f1eeee` | `#302c2c` | Inset snippets, disabl...
+DESIGN.md:19:| Border/strong | `--line-strong` | `#646262` | `#9a9898` | Active dividers a...
+DESIGN.md:20:| Text/primary | `--ink` | `#201d1d` | `#fdfcfc` | Primary text |
+DESIGN.md:21:| Text/strong | `--ink-strong` | `#0f0000` | `#ffffff` | Emphasis and pressed...
+DESIGN.md:22:| Text/body | `--charcoal` | `#302c2c` | `#f1eeee` | Body text with slightly ...
+DESIGN.md:23:| Text/muted | `--muted` | `#646262` | `#c8c4c4` | Secondary labels |
+DESIGN.md:24:| Text/faint | `--mute` | `#9a9898` | `#9a9898` | Disabled, hints, timestamps |
+DESIGN.md:25:| Action/primary | `--primary` | `#201d1d` | `#fdfcfc` | Primary buttons and ...
+DESIGN.md:26:| Action/pressed | `--primary-strong` | `#0f0000` | `#f1eeee` | Active primar...
+DESIGN.md:27:| Action/on-primary | `--on-primary` | `#fdfcfc` | `#201d1d` | Text on primar...
+DESIGN.md:28:| TUI/accent | `--accent` | `#007aff` | `#5eb1ff` | Informational TUI syntax ...
+DESIGN.md:29:| State/warning | `--warning` | `#ff9f0a` | `#ffbd45` | Caution states |
+DESIGN.md:30:| State/danger | `--danger` | `#ff3b30` | `#ff6961` | Error and destructive s...
+DESIGN.md:31:| State/success | `--success` | `#30d158` | `#62e27b` | Success states |
+DESIGN.md:32:| TUI/dark | `--surface-dark` | `#201d1d` | `#0f0000` | Terminal preview and ...
+DESIGN.md:33:| TUI/on-dark | `--on-dark` | `#fdfcfc` | `#fdfcfc` | Text on dark surfaces |
+DESIGN.md:60:- Primary and mono: `"JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, ...
+src/styles\globals.css:6:font-family: "JetBrains Mono";
+src/styles\globals.css:7:src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format...
+src/styles\globals.css:14:font-family: "JetBrains Mono";
+src/styles\globals.css:15:src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format(...
+src/styles\globals.css:22:font-family: "JetBrains Mono";
+src/styles\globals.css:23:src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("w...
+src/styles\globals.css:31:--bg: #fdfcfc;
+src/styles\globals.css:32:--canvas: #fdfcfc;
+src/styles\globals.css:33:--panel: #fdfcfc;
+src/styles\globals.css:34:--panel-dark: #201d1d;
+src/styles\globals.css:35:--panel-2: #f8f7f7;
+src/styles\globals.css:36:--panel-3: #f1eeee;
+src/styles\globals.css:38:--line-strong: #646262;
+src/styles\globals.css:39:--ink: #201d1d;
+src/styles\globals.css:40:--ink-strong: #0f0000;
+src/styles\globals.css:41:--charcoal: #302c2c;
+src/styles\globals.css:42:--muted: #646262;
+src/styles\globals.css:43:--mute: #9a9898;
+src/styles\globals.css:44:--primary: #201d1d;
+src/styles\globals.css:45:--primary-strong: #0f0000;
+src/styles\globals.css:46:--on-primary: #fdfcfc;
+src/styles\globals.css:47:--accent: #007aff;
+src/styles\globals.css:49:--surface-dark: #201d1d;
+src/styles\globals.css:50:--surface-dark-elevated: #302c2c;
+src/styles\globals.css:51:--on-dark: #fdfcfc;
+  +9 more in src/styles\globals.css [see remaining: tail -n +26 ~/AppData\Local\rtk\tee\1783420559_grep_1_src_styles_globals_css.log]
+src\App.tsx:682:const styleFamilies = regexValues(styles, /font-family\s*:\s*([^;\n]+)/gi, 24);
+src\App.tsx:3882:className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--line)...
+src\App.tsx:4840:<div className="rounded-xl border border-[#2a2a2a] bg-[var(--surface-dark)] p...
+src\components\ChatRow.tsx:114:? "border-[#101010] bg-[#101010] text-white"
+src\lib\prompt-template.ts:45:"Avoid AI slop: filler sections, fake metrics, generic SaaS layouts, decorati...
+src\lib\prompt-template.ts:407:2. Look for visible design failures: weak hierarchy, generic AI composition, ...
+src\lib\workspace-bridge.ts:61:'html[data-designforge-select="1"] [data-designforge-selected="true"] { outli...
+src\styles\globals.css:6:font-family: "JetBrains Mono";
+src\styles\globals.css:7:src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format...
+src\styles\globals.css:14:font-family: "JetBrains Mono";
+src\styles\globals.css:15:src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format(...
+src\styles\globals.css:22:font-family: "JetBrains Mono";
+src\styles\globals.css:23:src: url("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("w...
+src\styles\globals.css:31:--bg: #fdfcfc;
+src\styles\globals.css:32:--canvas: #fdfcfc;
+src\styles\globals.css:33:--panel: #fdfcfc;
+src\styles\globals.css:34:--panel-dark: #201d1d;
+src\styles\globals.css:35:--panel-2: #f8f7f7;
+src\styles\globals.css:36:--panel-3: #f1eeee;
+src\styles\globals.css:38:--line-strong: #646262;
+src\styles\globals.css:39:--ink: #201d1d;
+src\styles\globals.css:40:--ink-strong: #0f0000;
+src\styles\globals.css:41:--charcoal: #302c2c;
+src\styles\globals.css:42:--muted: #646262;
+src\styles\globals.css:43:--mute: #9a9898;
+src\styles\globals.css:44:--primary: #201d1d;
+src\styles\globals.css:45:--primary-strong: #0f0000;
+src\styles\globals.css:46:--on-primary: #fdfcfc;
+src\styles\globals.css:47:--accent: #007aff;
+src\styles\globals.css:49:--surface-dark: #201d1d;
+src\styles\globals.css:50:--surface-dark-elevated: #302c2c;
+src\styles\globals.css:51:--on-dark: #fdfcfc;
+  +9 more in src\styles\globals.css [see remaining: tail -n +26 ~/AppData\Local\rtk\tee\1783420559_grep_6_src_styles_globals_css.log]
+src/App.tsx:480:  "Interaction and State Model",
+src/App.tsx:1853:        "1. Request fit: artifact type, fidelity, audience, constraints, and option count.\n2. Source truth: assets, code, design systems, screenshots, and prior chat.\n3. System first: purpose, tone, differentiation, tokens, components, motion, and content rules.\n4. Content economy: no filler, fake metrics, or unrequested material.\n5. Visual distinctiveness: memorable direction, not generic AI defaults.\n6. Composition and scale: hierarchy, density, viewport, responsiveness, and type scale.\n7. Interaction realism: hover, focus, active, loading, empty, error, validation, and navigation states.\n8. Editability and anchors: literal copy, stable data-comment-anchor values, and narrow targeted edits.\n9. Asset integrity: real assets only, no invented logos/icons, no copyrighted recreation.\n10. Verification and handoff: previewability, assumptions, caveats, and implementation details.",
+src/App.tsx:1854:      "Interaction and State Model":
+src/App.tsx:2612:## Interactions & Behavior
+src/App.tsx:3908:            className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-[var(--muted)] transition hover:bg-white hover:text-[var(--ink)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
+src/App.tsx:3951:                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--charcoal)]">
+src/App.tsx:3982:                        className="flex min-h-7 items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 text-[11px] text-[var(--charcoal)]"
+src/App.tsx:4617:              <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3 text-[11px] leading-5 text-[var(--muted)]">
+src/App.tsx:4627:            <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3">
+src/App.tsx:4692:              className="mt-2 min-h-28 w-full resize-none rounded-[18px] border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+src/App.tsx:4709:            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 rounded-[18px] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(31,41,55,0.035)]">
+src/App.tsx:4727:              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-[18px] border border-[var(--line)] bg-white px-3 py-3">
+
+---
+Scenario: task-06 OpenCode-style DesignForge design system
+Invocation 1: rg -n "font-family|JetBrains|Berkeley|gradient|box-shadow|border-radius|#[0-9a-fA-F]{3,8}" DESIGN.md src/styles src > .omo/evidence/task-06-design-system.txt
+Invocation 2: rg -n "Berkeley|Inter|SF Pro|Segoe UI|box-shadow|rounded-\[18px\]|rounded-lg|linear-gradient|radial-gradient" DESIGN.md src/styles src/App.tsx >> .omo/evidence/task-06-design-system.txt || true
+Observable: DESIGN.md has OpenCode-style token tables and src/styles/globals.css loads JetBrains Mono first.
+Observable: no Berkeley, proportional font stack, box-shadow, linear-gradient, or radial-gradient matches remain in DESIGN.md or src/styles/globals.css.
+Observable: remaining second-pass matches are in src/App.tsx legacy copy/classNames for Task 7, including Inter false positives inside Interaction text.
+Font source: https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
+Font source: https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Medium.woff2
+Font source: https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Bold.woff2
+Cleanup receipt: no long-lived process, browser, port, or tmux session used.

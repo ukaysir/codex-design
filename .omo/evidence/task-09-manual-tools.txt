@@ -1,0 +1,19 @@
+2395:  async function startPreviewSafely() {
+2432:  async function verifyWorkspace(path: string) {
+2697:      const result = await verifyWorkspace(path);
+2717:  async function runManualRepair() {
+2747:  async function runManualCapture() {
+2787:  async function runManualCritique() {
+2855:  async function runManualQualityAudit() {
+2941:  async function runManualExport() {
+3760:              onClick={() => void startPreviewSafely()}
+3814:                    <Button className="mt-6" variant="primary" onClick={() => void startPreviewSafely()} disabled={busy || !workspacePath}>
+4099:              onClick={() => void startPreviewSafely()}
+4735:              onClick={() => void runManualRepair()}
+4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+4745:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+4749:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+4753:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+2697:      const result = await verifyWorkspace(path);
+
+NOTE: await verifyWorkspace(path) is inside runManualVerify, the explicit 검증 실행 button handler; runManualCritique and runManualQualityAudit no longer call verifyWorkspace, captureConsole, or captureScreenshot.

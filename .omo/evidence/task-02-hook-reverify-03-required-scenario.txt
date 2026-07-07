@@ -1,0 +1,20 @@
+src-tauri\src\main.rs:301:        ".designforge/generated-images.json",
+
+> designforge@0.1.0 build
+> node ./scripts/build.mjs
+
+
+## Scenario exit
+Invocation shell: C:\Program Files\Git\bin\bash.exe -lc
+Scenario exit code: 0
+
+## Judgment
+Build command in required scenario exits 0 via Git Bash after npm ci restored node_modules.
+Required rg output is not empty: it contains src-tauri/src/main.rs:301 .designforge/generated-images.json. This is outside allowed write scope because task forbids Rust edits.
+In-scope src search in task-02-hook-reverify-03.txt Command 6 exits 1, meaning no remaining active image generation symbols in src.
+
+## Cleanup receipt
+No long-lived process started.
+No browser used.
+No port used or opened.
+No tmux session used.

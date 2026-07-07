@@ -1,0 +1,2 @@
+src-tauri\src\main.rs:301:        ".designforge/generated-images.json",
+

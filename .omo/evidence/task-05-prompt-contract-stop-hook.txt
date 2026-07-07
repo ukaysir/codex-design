@@ -1,0 +1,423 @@
+STOP-HOOK VERIFICATION FOR TASK 05 PROMPT CONTRACT
+Repo: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main
+Scenario A invocation: rg -n "preview|capture|quality|critique|verify|test|tsc|install|server|runtime" src/lib src
+Scenario A binary observable: command exits 0 or 1 and artifact contains scan output, including prompt boundary lines.
+Scenario B invocation: node -e contract check over buildStructuredPrompt block
+Scenario B binary observable: exit code 0 and stdout contains CONTRACT_CHECK_PASS.
+Scenario C invocation: npm run build with npm_config_script_shell set to C:\Users\CKIRUser\Downloads\PowerShell-7.6.2-win-x64\pwsh.exe
+Scenario C binary observable: exit code 0 and stdout contains Vite "built" marker.
+Cleanup observable: no servers, browsers, tmux sessions, containers, or temp runtime state were started by this verification.
+
+
+=== Scenario A: rg scan ===
+src/lib\workspace-bridge.ts:87:          source: "designforge-preview-select",
+src\types.ts:3:export type CodexRuntime = "app-server" | "exec";
+src\types.ts:171:  qualityBar: string[];
+src\types.ts:194:  previewText?: string;
+src\types.ts:257:  critiqueStatus?: CritiqueManifest["status"];
+src\types.ts:258:  critiquePromptPath?: string;
+src\types.ts:259:  critiqueManifestPath?: string;
+src\types.ts:260:  qualityAuditStatus?: QualityAuditManifest["status"];
+src\types.ts:261:  qualityAuditPromptPath?: string;
+src\types.ts:262:  qualityAuditManifestPath?: string;
+src\types.ts:266:  previewUrl?: string;
+src\types.ts:267:  previewStatus?: PreviewManifest["status"];
+src/lib\prompt-template.ts:10:  qualityAuditPath?: string;
+src/lib\prompt-template.ts:28:  "10. Static handoff: keep the output structurally previewable, record assumptions/caveats, and document exact tokens/interactions/assets for implementation handoff.",
+src/lib\prompt-template.ts:35:  "This Codex workspace previews React/Tailwind through Vite, so convert Claude Design Component ideas into React/Tailwind rules instead of using DC-only tools.",
+src/lib\prompt-template.ts:52:  "Keep one primary artifact by default. Add files only when they materially improve preview, styling, assets, or design-system fidelity.",
+src/lib\prompt-template.ts:92:Design quality lenses to apply:
+src/lib\prompt-template.ts:105:7. Before coding a broad change, write concrete decisions for all 10 design quality lenses into ${designSystemPath}.
+src/lib\prompt-template.ts:108:10. Use stable kebab-case data-comment-anchor values on important regions such as hero, navigation, primary-action, feature-list, pricing, form, preview, and footer.
+src/lib\prompt-template.ts:113:- Do not start servers.
+src/lib\prompt-template.ts:114:- Do not install packages.
+src/lib\prompt-template.ts:115:- Do not run runtime tests.
+src/lib\prompt-template.ts:116:- Do not run tsc --noEmit.
+src/lib\prompt-template.ts:117:- Do not launch previews, browsers, screenshot capture, critique passes, quality audit passes, full typechecks, or runtime validation unless the user explicitly asks for that separate action.
+src/lib\prompt-template.ts:118:- If manual runtime validation is explicitly requested by the user, note exactly what was requested and keep it separate from the normal design run.
+src/lib\prompt-template.ts:138:- Use ${briefPath}, ${contextPath}, and ${clarificationPath} as quality evidence, not as user-visible copy.
+src/lib\prompt-template.ts:198:Design quality lenses to check before deciding questions:
+src/lib\prompt-template.ts:204:- Ask 6-10 questions when needed. For broad new projects, prefer 10 focused questions if they materially improve design quality.
+src/lib\prompt-template.ts:274:- Prototype enough behavior to make the design feel real, but keep generated code previewable and easy to edit.
+src/lib\prompt-template.ts:303:- preview:
+src/lib\prompt-template.ts:333:The generated workspace should pass TypeScript and Vite build checks before preview. Record any known caveats here.
+src/lib\prompt-template.ts:339:  verifyResult: { stdout: string; stderr: string; code: number | null },
+src/lib\prompt-template.ts:367:exit code: ${verifyResult.code ?? "unknown"}
+src/lib\prompt-template.ts:370:${trimForPrompt(verifyResult.stdout)}
+src/lib\prompt-template.ts:373:${trimForPrompt(verifyResult.stderr)}
+src/lib\prompt-template.ts:386:  return `You are running a DesignForge critique pass after preview screenshot capture.
+src/lib\prompt-template.ts:405:- If image inspection is unavailable, perform a source-level visual critique from ${designSystemPath}, ${artifactPath}, and src/styles.css.
+src/lib\prompt-template.ts:408:- ${options.consolePath ?? "(not captured)"}
+src/lib\prompt-template.ts:409:- If present, read this JSON and treat runtime errors as concrete defects to fix before subjective polish.
+src/lib\prompt-template.ts:424:- Summarize concrete critique findings.
+src/lib\prompt-template.ts:439:  const qualityAuditPath = options.qualityAuditPath ?? ".designforge/quality-audit.json";
+src/lib\prompt-template.ts:441:  return `You are running a DesignForge quality audit and improvement pass.
+src/lib\prompt-template.ts:459:- Screenshot: ${screenshotPath ?? "(not captured)"}
+src/lib\prompt-template.ts:460:- Console evidence: ${options.consolePath ?? "(not captured)"}
+src/lib\prompt-template.ts:462:Design quality lenses:
+src/lib\prompt-template.ts:469:1. Score the design from 0-100 across the 10 design quality lenses plus hierarchy, typography, color discipline, accessibility, and implementation fidelity.
+src/lib\prompt-template.ts:477:Write or update ${qualityAuditPath} as JSON with:
+src/lib\prompt-template.ts:501:    promptPath: "prompts/clarification-latest.md",
+src\AGENTS.md:5:`src` owns the DesignForge desktop UI: chat-first request intake, project switching, prompt assembly, Codex runtime controls, generated artifact preview, evidence panels, and manual action buttons.
+src\AGENTS.md:14:|   |-- prompt-template.ts     # Design, clarification, repair, critique, audit prompts
+src\AGENTS.md:15:|   |-- chat-messages.ts       # Chat JSONL parsing and app-server event labels
+src\AGENTS.md:28:| Change Codex prompt behavior | `lib/prompt-template.ts` | Preserve design-quality lenses and non-exposure rule |
+src\AGENTS.md:40:- Keep manual actions explicit: verify, repair, preview, capture, critique, quality audit, handoff, export.
+src\AGENTS.md:48:- Do not auto-run expensive verification/capture/audit stages as part of every default chat request.
+src\AGENTS.md:50:- Do not introduce generic AI-SaaS design rules into prompt templates; keep the stricter DesignForge quality lenses.
+src\AGENTS.md:59:If UI behavior changes, run frontend dev server and manually drive the matching panel or action:
+src\App.tsx:87:  codexRuntime: "app-server",
+src\App.tsx:107:const QUALITY_AUDIT_PATH = ".designforge/quality-audit.json";
+src\App.tsx:108:const PROMPT_PATH = "prompts/latest.md";
+src\App.tsx:109:const CLARIFICATION_PROMPT_PATH = "prompts/clarification-latest.md";
+src\App.tsx:110:const REPAIR_PROMPT_PATH = "prompts/repair-latest.md";
+src\App.tsx:111:const CRITIQUE_PROMPT_PATH = "prompts/critique-latest.md";
+src\App.tsx:112:const QUALITY_PROMPT_PATH = "prompts/quality-latest.md";
+src\App.tsx:113:const CRITIQUE_MANIFEST_PATH = ".designforge/critique.json";
+src\App.tsx:117:const PREVIEW_MANIFEST_PATH = ".designforge/preview.json";
+src\App.tsx:121:const SCREENSHOT_PATH = "outputs/screenshots/latest.png";
+src\App.tsx:122:const CONSOLE_PATH = "outputs/console/latest.json";
+src\App.tsx:199:  { id: "verify", label: "Verify", detail: "Manual TypeScript and Vite check", status: "idle" },
+src\App.tsx:201:  { id: "preview", label: "Preview", detail: "Manual local preview server", status: "idle" },
+src\App.tsx:202:  { id: "screenshot", label: "Screenshot", detail: "Manual preview evidence capture", status: "idle" },
+src\App.tsx:203:  { id: "console", label: "Console", detail: "Manual runtime console capture", status: "idle" },
+src\App.tsx:204:  { id: "critique", label: "Critique", detail: "Manual screenshot-driven critique pass", status: "idle" },
+src\App.tsx:205:  { id: "quality", label: "Quality", detail: "Manual design quality audit pass", status: "idle" },
+src\App.tsx:342:function previewFrameSrc(url: string, selectionMode: boolean) {
+src\App.tsx:347:function isPreviewSelection(value: unknown): value is PreviewSelection & { source: "designforge-preview-select" } {
+src\App.tsx:350:  return data.source === "designforge-preview-select" && typeof data.anchorId === "string" && data.anchorId.length > 0;
+src\App.tsx:357:    /\.(md|mdx|txt|json|csv|ts|tsx|js|jsx|css|scss|html|xml|yml|yaml|toml|ini|env|log)$/i.test(file.name)
+src\App.tsx:438:      const preview = item.previewText ? `\nPreview:\n${item.previewText}` : "";
+src\App.tsx:439:      return `${index + 1}. ${item.name}\n- kind: ${item.kind}\n- mediaType: ${item.mediaType || "unknown"}\n- size: ${item.size} bytes\n- workspacePath: ${item.relativePath}${preview}`;
+src\App.tsx:451:Use these attachments as source material. For image attachments, inspect the saved workspace file path. For text or Markdown attachments, treat the preview above and the saved file as source truth.`;
+src\App.tsx:457:    "source: DesignForge preview click",
+src\App.tsx:540:  if (/#[0-9a-f]{6}/i.test(markdown) || markdown.includes("oklch(") || markdown.includes("rgb(")) score += 5;
+src\App.tsx:541:  if (/font|type|typography|서체|폰트/i.test(markdown)) score += 5;
+src\App.tsx:542:  if (/data-comment-anchor|anchor/i.test(markdown)) score += 5;
+src\App.tsx:543:  if (/motion|animation|transition|reduced-motion|모션/i.test(markdown)) score += 5;
+src\App.tsx:557:  if (/@[a-z][a-z0-9-]{1,63}/i.test(request) || request.includes("<mentioned-element>")) return "targeted-edit";
+src\App.tsx:558:  if (/(새로|처음부터|new direction|fresh|reset|replace|리디자인|redesign)/i.test(lower)) return "fresh-design";
+src\App.tsx:563:  if (/dashboard|admin|crm|관리자|운영|어드민/i.test(request)) return "Repeated operational users who need dense, scannable controls.";
+src\App.tsx:564:  if (/landing|랜딩|marketing|홈페이지|site|website/i.test(request)) return "Prospective users evaluating the product promise in the first viewport.";
+src\App.tsx:565:  if (/mobile|app|onboarding|가입|설정/i.test(request)) return "End users completing a focused product flow with low friction.";
+src\App.tsx:570:  if (/수정|변경|바꿔|edit|fix|adjust/i.test(request)) return "Refine the existing artifact while preserving the current system.";
+src\App.tsx:577:  const asksForNewWork = /(새로|처음부터|new\s+screen|fresh|reset|replace\s+the\s+whole|리디자인|전체\s*교체|랜딩|페이지\s*만들|앱\s*만들|사이트\s*만들)/i.test(request);
+src\App.tsx:580:    /(@[a-z][a-z0-9-]{1,63}|줄바꿈|줄\s*바꿈|개행|위치|정렬|간격|여백|크기|폰트|글자|색|컬러|문구|텍스트|버튼|작게|크게|왼쪽|오른쪽|위로|아래로|수정|변경|바꿔|고쳐|edit|fix|adjust|move|resize|align|spacing|padding|margin|color|text)/i.test(request);
+src\App.tsx:584:function qualityBar() {
+src\App.tsx:680:    .filter((line) => /font|type|typography|서체|폰트|leading|line-height|tracking/i.test(line))
+src\App.tsx:685:    (token) => /^(font|text|leading|tracking)-/.test(token),
+src\App.tsx:847:  const indexes = tokens.map((token, index) => (/^p[trblxy]?-[\w.]+$/.test(token) ? index : -1)).filter((index) => index >= 0);
+src\App.tsx:880:  if (!stringClass && /\sclassName=/.test(opening)) return null;
+src\App.tsx:1010:  const [preview, setPreview] = useState<PreviewInfo | null>(null);
+src\App.tsx:1014:  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+src\App.tsx:1025:  const [latestBrief, setLatestBrief] = useState<DesignBriefManifest | null>(null);
+src\App.tsx:1026:  const [latestContext, setLatestContext] = useState<DesignContextManifest | null>(null);
+src\App.tsx:1027:  const [latestTokenManifest, setLatestTokenManifest] = useState<DesignTokenManifest | null>(null);
+src\App.tsx:1028:  const [latestStaticCheck, setLatestStaticCheck] = useState<StaticCheckManifest | null>(null);
+src\App.tsx:1029:  const [latestClarification, setLatestClarification] = useState<DesignClarificationManifest | null>(null);
+src\App.tsx:1156:    void listen<CodexAppServerEvent>("codex-app-server-event", (event) => {
+src\App.tsx:1378:        let previewText: string | undefined;
+src\App.tsx:1382:          previewText = trimAttachmentPreview(text);
+src\App.tsx:1396:          previewText,
+src\App.tsx:1430:      setLatestBrief(manifest);
+src\App.tsx:1433:      setLatestBrief(null);
+src\App.tsx:1442:      setLatestContext(manifest);
+src\App.tsx:1445:      setLatestContext(null);
+src\App.tsx:1454:      setLatestTokenManifest(manifest);
+src\App.tsx:1457:      setLatestTokenManifest(null);
+src\App.tsx:1466:      setLatestStaticCheck(manifest);
+src\App.tsx:1469:      setLatestStaticCheck(null);
+src\App.tsx:1478:      setLatestClarification(manifest);
+src\App.tsx:1481:      setLatestClarification(null);
+src\App.tsx:1502:  function previewManifest(status: PreviewManifest["status"], patch: Omit<PreviewManifest, "status" | "updatedAt"> = {}) {
+src\App.tsx:1532:    setLatestClarification(null);
+src\App.tsx:1533:    setLatestBrief(null);
+src\App.tsx:1534:    setLatestContext(null);
+src\App.tsx:1535:    setLatestTokenManifest(null);
+src\App.tsx:1536:    setLatestStaticCheck(null);
+src\App.tsx:1548:      await callTauri("stop_preview");
+src\App.tsx:1550:      // Project switching should not fail just because no preview is running.
+src\App.tsx:1682:      const status = await callTauri<CodexAppServerStatus>("codex_app_server_status", {
+src\App.tsx:1688:      pushLog("error", `Could not read Codex app-server status: ${textFromError(error)}`);
+src\App.tsx:1696:      await callTauri("stop_codex_app_server", {});
+src\App.tsx:1699:      pushLog("success", "Stopped persistent Codex app-server.");
+src\App.tsx:1701:        await appendChatMessage(workspacePath, "assistant", "Codex app-server 연결을 중지했습니다. 다음 요청 때 다시 시작합니다.", "tool", "info");
+src\App.tsx:1704:      pushLog("error", `Could not stop Codex app-server: ${textFromError(error)}`);
+src\App.tsx:1711:      await callTauri("reset_codex_app_server_session", { workspacePath });
+src\App.tsx:1716:      pushLog("error", `Could not reset Codex app-server session: ${textFromError(error)}`);
+src\App.tsx:1750:        pushLog("success", "Upgraded preview click selection bridge.");
+src\App.tsx:1760:        pushLog("info", "Workspace src/App.tsx is custom; preview click selection will use the anchor list fallback.");
+src\App.tsx:1769:      pushLog("success", "Enabled preview click selection bridge.");
+src\App.tsx:1771:      pushLog("error", `Could not enable preview selection bridge: ${textFromError(error)}`);
+src\App.tsx:1853:        "1. Request fit: artifact type, fidelity, audience, constraints, and option count.\n2. Source truth: assets, code, design systems, screenshots, and prior chat.\n3. System first: purpose, tone, differentiation, tokens, components, motion, and content rules.\n4. Content economy: no filler, fake metrics, or unrequested material.\n5. Visual distinctiveness: memorable direction, not generic AI defaults.\n6. Composition and scale: hierarchy, density, viewport, responsiveness, and type scale.\n7. Interaction realism: hover, focus, active, loading, empty, error, validation, and navigation states.\n8. Editability and anchors: literal copy, stable data-comment-anchor values, and narrow targeted edits.\n9. Asset integrity: real assets only, no invented logos/icons, no copyrighted recreation.\n10. Verification and handoff: previewability, assumptions, caveats, and implementation details.",
+src\App.tsx:1914:    pushLog("success", `Updated DESIGN.md quality scaffold. Health ${nextHealth.score}/100.`);
+src\App.tsx:1927:      .filter((file) => file.startsWith("assets/") || /\.(png|jpe?g|webp|gif|svg|ico|avif|ttf|otf|woff2?)$/i.test(file))
+src\App.tsx:1930:      .filter((file) => /\.(css|scss|sass|less|cjs|mjs|config\.js|config\.ts)$/i.test(file) || file.includes("tailwind"))
+src\App.tsx:1933:      .filter((file) => file.startsWith("src/") && /\.(tsx?|jsx?)$/i.test(file))
+src\App.tsx:1972:    clarification: DesignClarificationManifest | null = latestClarification,
+src\App.tsx:1999:      qualityBar: qualityBar(),
+src\App.tsx:2079:      (token) => /^(?:-?m[trblxy]?|-?p[trblxy]?|gap|space-[xy]|inset|top|right|bottom|left|w|h|min-w|min-h|max-w|max-h)-/.test(token),
+src\App.tsx:2082:    const radiusClasses = extractTailwindClasses(artifact, (token) => /^rounded(?:-|$)/.test(token), 48);
+src\App.tsx:2083:    const shadowClasses = extractTailwindClasses(artifact, (token) => /^shadow(?:-|$|\[)/.test(token), 48);
+src\App.tsx:2112:    setLatestTokenManifest(manifest);
+src\App.tsx:2135:        status: /export\s+default\s+function|export\s+default\s+[A-Z]/.test(artifact) ? "passed" : "failed",
+src\App.tsx:2136:        message: /export\s+default\s+function|export\s+default\s+[A-Z]/.test(artifact)
+src\App.tsx:2142:        status: /data-screen-label\s*=/.test(artifact) ? "passed" : "warning",
+src\App.tsx:2143:        message: /data-screen-label\s*=/.test(artifact)
+src\App.tsx:2163:        status: /\blorem ipsum\b|\bTODO\b|dummy data|fake metric/i.test(artifact) ? "warning" : "passed",
+src\App.tsx:2164:        message: /\blorem ipsum\b|\bTODO\b|dummy data|fake metric/i.test(artifact)
+src\App.tsx:2185:    setLatestStaticCheck(manifest);
+src\App.tsx:2195:    clarification: DesignClarificationManifest | null = latestClarification,
+src\App.tsx:2247:  async function writeRepairPrompt(path: string, request: string, verifyResult: CommandResult) {
+src\App.tsx:2248:    const prompt = buildRepairPrompt(request, verifyResult, { artifactPath: ARTIFACT_PATH });
+src\App.tsx:2285:    pushLog("success", `Prepared critique input: ${CRITIQUE_PROMPT_PATH}`);
+src\App.tsx:2321:      qualityAuditPath: QUALITY_AUDIT_PATH,
+src\App.tsx:2342:    pushLog("success", `Prepared quality audit input: ${QUALITY_PROMPT_PATH}`);
+src\App.tsx:2382:    const info = await callTauri<PreviewInfo>("start_preview", {
+src\App.tsx:2388:      previewManifest("running", { url: info.url, pid: info.pid, statusCode: info.statusCode }),
+src\App.tsx:2396:    setStep("preview", "active");
+src\App.tsx:2399:      await appendChatMessage(target, "assistant", "사용자 요청으로 Vite preview 서버를 시작합니다.", "tool", "info");
+src\App.tsx:2401:      setStep("preview", "done");
+src\App.tsx:2404:      setStep("preview", "error");
+src\App.tsx:2406:        await savePreviewManifest(workspacePath, previewManifest("error", { error: textFromError(error) }));
+src\App.tsx:2414:    await callTauri("stop_preview");
+src\App.tsx:2416:      await savePreviewManifest(workspacePath, previewManifest("stopped"));
+src\App.tsx:2428:      pushLog("error", `Could not stop preview: ${textFromError(error)}`);
+src\App.tsx:2432:  async function verifyWorkspace(path: string) {
+src\App.tsx:2433:    const result = await callTauri<CommandResult>("verify_workspace", {
+src\App.tsx:2437:    pushCommandResult("Workspace verify", result);
+src\App.tsx:2445:    const runtime = settings.codexRuntime || "app-server";
+src\App.tsx:2455:    if (runtime === "app-server") {
+src\App.tsx:2460:        result = await callTauri<CommandResult>("run_codex_app_server", { ...args, runId });
+src\App.tsx:2465:        pushLog("error", `Codex app-server unavailable; retrying with codex exec: ${textFromError(error)}`);
+src\App.tsx:2485:    verifyResult: CommandResult,
+src\App.tsx:2490:    critique: CritiqueManifest | null,
+src\App.tsx:2498:    let qualityAudit = "";
+src\App.tsx:2530:      qualityAudit = await callTauri<string>("read_file", { workspacePath: path, relativePath: QUALITY_AUDIT_PATH });
+src\App.tsx:2532:      qualityAudit = "";
+src\App.tsx:2534:    const verificationStatus = verifyResult.stdout === "Verification not requested."
+src\App.tsx:2536:      : verifyResult.success
+src\App.tsx:2563:- Quality audit: ${qualityAudit ? QUALITY_AUDIT_PATH : "not-created"}
+src\App.tsx:2575:${qualityAudit ? `### Quality Audit\n\n\`\`\`json\n${qualityAudit.trim()}\n\`\`\`` : ""}
+src\App.tsx:2580:- Verification exit code: ${verifyResult.code ?? "unknown"}
+src\App.tsx:2588:${consoleInfo ? `- Console capture: ${consoleInfo.relativePath}` : ""}
+src\App.tsx:2599:- Critique status: ${critique?.status ?? "not-created"}
+src\App.tsx:2600:${critique ? `- Critique prompt: ${critique.promptPath}` : ""}
+src\App.tsx:2601:${critique ? `- Critique manifest: ${critique.manifestPath}` : ""}
+src\App.tsx:2602:${critique?.screenshotPath ? `- Critique screenshot source: ${critique.screenshotPath}` : ""}
+src\App.tsx:2603:${critique?.consolePath ? `- Critique console source: ${critique.consolePath}` : ""}
+src\App.tsx:2604:${critique?.error ? `- Critique rollback reason: ${critique.error}` : ""}
+src\App.tsx:2634:${qualityAudit ? `- ${QUALITY_AUDIT_PATH}` : ""}
+src\App.tsx:2635:${qualityAudit ? `- ${QUALITY_PROMPT_PATH}` : ""}
+src\App.tsx:2637:${critique ? `- ${critique.promptPath}` : ""}
+src\App.tsx:2638:${critique ? `- ${critique.manifestPath}` : ""}
+src\App.tsx:2658:  async function captureScreenshot(path: string, url: string) {
+src\App.tsx:2659:    const info = await callTauri<ScreenshotInfo>("capture_screenshot", { workspacePath: path, url });
+src\App.tsx:2664:  async function captureConsole(path: string, url: string) {
+src\App.tsx:2665:    const info = await callTauri<ConsoleInfo>("capture_console", { workspacePath: path, url });
+src\App.tsx:2693:    setStep("verify", "active");
+src\App.tsx:2697:      const result = await verifyWorkspace(path);
+src\App.tsx:2699:      setStep("verify", result.success ? "done" : "error");
+src\App.tsx:2709:      setStep("verify", "error");
+src\App.tsx:2724:      const repairPrompt = await writeRepairPrompt(path, latestRun?.request ?? "Manual DesignForge repair", manualVerifyResult);
+src\App.tsx:2748:    if (busy || !preview) return;
+src\App.tsx:2757:        const consoleCapture = await captureConsole(path, preview.url);
+src\App.tsx:2762:        pushLog("error", `Console capture unavailable: ${textFromError(error)}`);
+src\App.tsx:2766:        const screenshotCapture = await captureScreenshot(path, preview.url);
+src\App.tsx:2790:    setStep("critique", "active");
+src\App.tsx:2798:      let critique = await writeCritiquePrompt(path, latestRun?.request ?? "Manual DesignForge critique", screenshot, consoleInfo);
+src\App.tsx:2799:      setManualCritique(critique);
+src\App.tsx:2801:        setStep("critique", "error");
+src\App.tsx:2815:        const critiquePrompt = await callTauri<string>("read_file", {
+src\App.tsx:2819:        await runCodexPrompt(path, critiquePrompt, "Codex critique");
+src\App.tsx:2821:        critique = { ...critique, status: "applied", updatedAt: new Date().toISOString() };
+src\App.tsx:2822:        await saveCritiqueManifest(path, critique);
+src\App.tsx:2823:        setManualCritique(critique);
+src\App.tsx:2829:        setStep("critique", "done");
+src\App.tsx:2833:        critique = {
+src\App.tsx:2834:          ...critique,
+src\App.tsx:2839:        await saveCritiqueManifest(path, critique);
+src\App.tsx:2840:        setManualCritique(critique);
+src\App.tsx:2841:        setStep("critique", "error");
+src\App.tsx:2847:      setStep("critique", "error");
+src\App.tsx:2858:    setStep("quality", "active");
+src\App.tsx:2866:      let audit = await writeQualityAuditPrompt(path, latestRun?.request ?? "Manual DesignForge quality audit", screenshot, consoleInfo);
+src\App.tsx:2869:        setStep("quality", "error");
+src\App.tsx:2885:        const qualityPrompt = await callTauri<string>("read_file", {
+src\App.tsx:2889:        await runCodexPrompt(path, qualityPrompt, "Codex quality audit");
+src\App.tsx:2909:        setStep("quality", audit.status === "failed" ? "error" : "done");
+src\App.tsx:2927:        setStep("quality", "error");
+src\App.tsx:2933:      setStep("quality", "error");
+src\App.tsx:2952:      const previewState = preview
+src\App.tsx:2953:        ? previewManifest("running", { url: preview.url, pid: preview.pid, statusCode: preview.statusCode })
+src\App.tsx:2955:      const verifyResult =
+src\App.tsx:2966:        latestRun?.request ?? "Manual DesignForge handoff",
+src\App.tsx:2968:        verifyResult,
+src\App.tsx:2969:        previewState,
+src\App.tsx:3031:      setLatestClarification(nextClarification);
+src\App.tsx:3078:      setLatestClarification(failed);
+src\App.tsx:3107:    const targetedAnchorId = anchorFromRequest(effectiveRequest) || selectedAnchorId || previewSelection?.anchorId || "";
+src\App.tsx:3115:          const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+src\App.tsx:3126:        const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+src\App.tsx:3129:            ? buildTargetedComponentRequest(targetedAnchorId, screenLabel, effectiveRequest, previewSelection)
+src\App.tsx:3221:    const clarification = options.clarification ?? latestClarification;
+src\App.tsx:3232:      if (clarification) setLatestClarification(clarification);
+src\App.tsx:3264:      setLatestContext(context);
+src\App.tsx:3265:      setLatestBrief(brief);
+src\App.tsx:3294:        title: codexRuntime === "app-server" ? "살아있는 Codex 세션에서 변경을 실행합니다." : "Codex exec로 변경을 실행합니다.",
+src\App.tsx:3297:          `runtime=${codexRuntime}`,
+src\App.tsx:3300:          codexServerStatus?.running ? "기존 app-server 연결이 살아있습니다." : "필요하면 app-server 연결을 시작합니다.",
+src\App.tsx:3350:        setLatestContext(context);
+src\App.tsx:3587:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+src\App.tsx:3588:    const selectedText = previewSelection?.text.trim() || "";
+src\App.tsx:3591:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+src\App.tsx:3605:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+src\App.tsx:3607:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+src\App.tsx:3616:        applyAnchoredClassAdjustment(source, anchorId, previewSelection, (className) =>
+src\App.tsx:3624:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+src\App.tsx:3628:    const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+src\App.tsx:3637:    const request = buildTargetedComponentRequest(anchorId, screenLabel, note, previewSelection);
+src\App.tsx:3647:  const latestRun = runHistory[0];
+src\App.tsx:3652:  const codexRuntime = settings.codexRuntime || "app-server";
+src\App.tsx:3655:  const codexServerRunning = codexRuntime === "app-server" && !!codexServerStatus?.running;
+src\App.tsx:3656:  const codexServerLabel = codexServerRunning ? "connected" : codexRuntime === "app-server" ? "standby" : "exec";
+src\App.tsx:3659:  const verifyStepStatus = steps.find((step) => step.id === "verify")?.status ?? "idle";
+src\App.tsx:3660:  const qualityStepStatus = steps.find((step) => step.id === "quality")?.status ?? "idle";
+src\App.tsx:3661:  const consolePath = manualConsoleInfo?.relativePath ?? latestRun?.consolePath;
+src\App.tsx:3662:  const consoleErrors = manualConsoleInfo?.errorCount ?? latestRun?.consoleErrorCount;
+src\App.tsx:3663:  const consoleWarnings = manualConsoleInfo?.warningCount ?? latestRun?.consoleWarningCount;
+src\App.tsx:3664:  const screenshotPath = manualScreenshotInfo?.relativePath ?? latestRun?.screenshotPath;
+src\App.tsx:3665:  const exportReadyPath = manualExportPath || latestRun?.exportPath || "";
+src\App.tsx:3666:  const critiqueStatus = manualCritique?.status ?? latestRun?.critiqueStatus;
+src\App.tsx:3667:  const qualityStatus = manualQualityAudit?.status ?? latestRun?.qualityAuditStatus;
+src\App.tsx:3668:  const designHealth = latestBrief?.designSystemHealth;
+src\App.tsx:3669:  const tokenSummary = latestTokenManifest
+src\App.tsx:3670:    ? `${latestTokenManifest.colors.length} colors · ${latestTokenManifest.componentInventory.length} anchors`
+src\App.tsx:3693:        : verifyStepStatus === "active"
+src\App.tsx:3700:        : verifyStepStatus === "active"
+src\App.tsx:3721:      value: qualityStatus
+src\App.tsx:3722:        ? qualityStatus
+src\App.tsx:3723:        : qualityStepStatus === "active"
+src\App.tsx:3727:        qualityStatus === "applied" || qualityStatus === "no-change"
+src\App.tsx:3729:          : qualityStatus === "failed"
+src\App.tsx:3731:            : qualityStepStatus === "active"
+src\App.tsx:3737:      value: latestStaticCheck?.status ?? latestRun?.staticCheckStatus ?? "요청 대기",
+src\App.tsx:3738:      tone: staticCheckTone(latestStaticCheck?.status ?? latestRun?.staticCheckStatus),
+src\App.tsx:3745:        data-screen-label="designforge-artifact-only-preview"
+src\App.tsx:3750:            <p className="text-sm font-semibold text-[var(--primary)]">artifact only preview</p>
+src\App.tsx:3770:              disabled={!preview}
+src\App.tsx:3791:              <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비 필요"} · Ctrl+Shift+P 토글 · Esc 닫기</span>
+src\App.tsx:3797:              {preview ? (
+src\App.tsx:3799:                  title="Workspace artifact 1920 by 1080 preview"
+src\App.tsx:3800:                  src={previewFrameSrc(preview.url, selectionMode)}
+src\App.tsx:3809:                    <p className="font-mono text-xs uppercase tracking-normal text-[var(--muted)]">preview waiting</p>
+src\App.tsx:3887:                  {codexRuntime === "app-server" && codexStream.status === "running" ? (
+src\App.tsx:3892:                        content: codexStream.text || "Codex app-server가 요청을 처리하고 있습니다.",
+src\App.tsx:3910:                {selectedAnchor || previewSelection ? (
+src\App.tsx:3913:                      <span className="font-medium text-[var(--ink)]">selection-ready preview</span>
+src\App.tsx:3916:                    <p className="mt-1 truncate font-mono">{previewSelection?.path?.at(-1) || previewSelection?.tagName || selectedAnchor?.screenLabel || "anchor fallback"}</p>
+src\App.tsx:3917:                    {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+src\App.tsx:4068:                        {(run.codexSessionId || run.previewStatus || run.exportPath) && (
+src\App.tsx:4075:                            {run.previewStatus && <span>preview: {run.previewStatus}</span>}
+src\App.tsx:4076:                            {run.critiqueStatus && <span>critique: {run.critiqueStatus}</span>}
+src\App.tsx:4092:      <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-white">
+src\App.tsx:4095:            <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
+src\App.tsx:4109:              disabled={!preview}
+src\App.tsx:4118:              disabled={!preview}
+src\App.tsx:4152:              <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비"}</span>
+src\App.tsx:4154:            {preview ? (
+src\App.tsx:4156:                title="Workspace preview"
+src\App.tsx:4157:                src={previewFrameSrc(preview.url, selectionMode)}
+src\App.tsx:4187:                          <Badge tone="lime">{latestRun?.status === "success" ? "검토 가능" : busy ? "작성 중" : "대기"}</Badge>
+src\App.tsx:4379:            <Badge tone={busy ? "cyan" : latestRun?.status === "error" ? "danger" : latestRun?.status === "success" ? "lime" : "steel"}>
+src\App.tsx:4380:              {busy ? "실행 중" : latestRun?.status === "success" ? "생성 완료" : latestRun?.status === "error" ? "확인 필요" : "대기"}
+src\App.tsx:4399:            <Badge tone={codexRuntime === "app-server" ? "lime" : "steel"}>{codexRuntime}</Badge>
+src\App.tsx:4403:            {(["app-server", "exec"] as CodexRuntime[]).map((runtime) => (
+src\App.tsx:4405:                key={runtime}
+src\App.tsx:4407:                onClick={() => patchSettings({ codexRuntime: runtime })}
+src\App.tsx:4411:                  codexRuntime === runtime
+src\App.tsx:4416:                {runtime}
+src\App.tsx:4497:          {codexRuntime === "app-server" && (codexStream.status !== "idle" || codexStream.text) ? (
+src\App.tsx:4501:                <span className="truncate font-mono text-[var(--on-dark-muted)]">{codexStream.method || "app-server"}</span>
+src\App.tsx:4504:                {codexStream.text || "Codex app-server connected..."}
+src\App.tsx:4516:            ["Brief", latestBrief?.mode ?? "guided", designHealth ? `${designHealth.score}/100` : "pending"],
+src\App.tsx:4519:              latestClarification ? `${latestClarification.confidence}/100` : "pending",
+src\App.tsx:4520:              latestClarification?.shouldAskQuestions ? `${latestClarification.questions.length} qs` : latestClarification ? "skipped" : "AI",
+src\App.tsx:4522:            ["Context", latestContext ? `${latestContext.assetFiles.length} assets` : "pending", latestContext ? `${latestContext.sourceFiles.length} src` : "ready"],
+src\App.tsx:4523:            ["Tokens", tokenSummary, latestTokenManifest ? `${latestTokenManifest.typography.length} type` : "pending"],
+src\App.tsx:4525:            ["Artifact", ARTIFACT_PATH, preview ? "live" : "ready"],
+src\App.tsx:4558:                disabled={!preview}
+src\App.tsx:4595:            {selectedAnchor || previewSelection ? (
+src\App.tsx:4598:                  <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
+src\App.tsx:4599:                  <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
+src\App.tsx:4601:                {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+src\App.tsx:4602:                {previewSelection?.path?.length ? <p className="mt-1 truncate font-mono">{previewSelection.path[previewSelection.path.length - 1]}</p> : null}
+src\App.tsx:4609:                <Badge tone={previewSelection?.text ? "lime" : selectedAnchorId ? "cyan" : "steel"}>
+src\App.tsx:4610:                  {previewSelection?.text ? "텍스트 선택" : selectedAnchorId ? "앵커 선택" : "대기"}
+src\App.tsx:4618:                disabled={busy || !previewSelection?.text}
+src\App.tsx:4625:                  disabled={busy || !previewSelection?.text || !selectedTextDraft.trim() || selectedTextDraft.trim() === previewSelection.text.trim()}
+src\App.tsx:4717:            {critiqueStatus ? <Badge tone={critiqueStatus === "applied" ? "lime" : critiqueStatus === "failed" ? "danger" : "steel"}>critique {critiqueStatus}</Badge> : null}
+src\App.tsx:4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+src\lib\workspace-bridge.ts:87:          source: "designforge-preview-select",
+src\lib\prompt-template.ts:10:  qualityAuditPath?: string;
+src\lib\prompt-template.ts:28:  "10. Static handoff: keep the output structurally previewable, record assumptions/caveats, and document exact tokens/interactions/assets for implementation handoff.",
+src\lib\prompt-template.ts:35:  "This Codex workspace previews React/Tailwind through Vite, so convert Claude Design Component ideas into React/Tailwind rules instead of using DC-only tools.",
+src\lib\prompt-template.ts:52:  "Keep one primary artifact by default. Add files only when they materially improve preview, styling, assets, or design-system fidelity.",
+src\lib\prompt-template.ts:92:Design quality lenses to apply:
+src\lib\prompt-template.ts:105:7. Before coding a broad change, write concrete decisions for all 10 design quality lenses into ${designSystemPath}.
+src\lib\prompt-template.ts:108:10. Use stable kebab-case data-comment-anchor values on important regions such as hero, navigation, primary-action, feature-list, pricing, form, preview, and footer.
+src\lib\prompt-template.ts:113:- Do not start servers.
+src\lib\prompt-template.ts:114:- Do not install packages.
+src\lib\prompt-template.ts:115:- Do not run runtime tests.
+src\lib\prompt-template.ts:116:- Do not run tsc --noEmit.
+src\lib\prompt-template.ts:117:- Do not launch previews, browsers, screenshot capture, critique passes, quality audit passes, full typechecks, or runtime validation unless the user explicitly asks for that separate action.
+src\lib\prompt-template.ts:118:- If manual runtime validation is explicitly requested by the user, note exactly what was requested and keep it separate from the normal design run.
+src\lib\prompt-template.ts:138:- Use ${briefPath}, ${contextPath}, and ${clarificationPath} as quality evidence, not as user-visible copy.
+src\lib\prompt-template.ts:198:Design quality lenses to check before deciding questions:
+src\lib\prompt-template.ts:204:- Ask 6-10 questions when needed. For broad new projects, prefer 10 focused questions if they materially improve design quality.
+src\lib\prompt-template.ts:274:- Prototype enough behavior to make the design feel real, but keep generated code previewable and easy to edit.
+src\lib\prompt-template.ts:303:- preview:
+src\lib\prompt-template.ts:333:The generated workspace should pass TypeScript and Vite build checks before preview. Record any known caveats here.
+src\lib\prompt-template.ts:339:  verifyResult: { stdout: string; stderr: string; code: number | null },
+src\lib\prompt-template.ts:367:exit code: ${verifyResult.code ?? "unknown"}
+src\lib\prompt-template.ts:370:${trimForPrompt(verifyResult.stdout)}
+src\lib\prompt-template.ts:373:${trimForPrompt(verifyResult.stderr)}
+src\lib\prompt-template.ts:386:  return `You are running a DesignForge critique pass after preview screenshot capture.
+src\lib\prompt-template.ts:405:- If image inspection is unavailable, perform a source-level visual critique from ${designSystemPath}, ${artifactPath}, and src/styles.css.
+src\lib\prompt-template.ts:408:- ${options.consolePath ?? "(not captured)"}
+src\lib\prompt-template.ts:409:- If present, read this JSON and treat runtime errors as concrete defects to fix before subjective polish.
+src\lib\prompt-template.ts:424:- Summarize concrete critique findings.
+src\lib\prompt-template.ts:439:  const qualityAuditPath = options.qualityAuditPath ?? ".designforge/quality-audit.json";
+src\lib\prompt-template.ts:441:  return `You are running a DesignForge quality audit and improvement pass.
+src\lib\prompt-template.ts:459:- Screenshot: ${screenshotPath ?? "(not captured)"}
+src\lib\prompt-template.ts:460:- Console evidence: ${options.consolePath ?? "(not captured)"}
+src\lib\prompt-template.ts:462:Design quality lenses:
+src\lib\prompt-template.ts:469:1. Score the design from 0-100 across the 10 design quality lenses plus hierarchy, typography, color discipline, accessibility, and implementation fidelity.
+src\lib\prompt-template.ts:477:Write or update ${qualityAuditPath} as JSON with:
+src\lib\prompt-template.ts:501:    promptPath: "prompts/clarification-latest.md",
+SCENARIO_A_EXIT=0
+
+=== Scenario B: node contract check ===
+CONTRACT_CHECK_PASS stop at design|Do not start servers|Do not install packages|Do not run runtime tests|Do not run tsc --noEmit
+SCENARIO_B_EXIT=0
+
+=== Scenario C: npm run build ===
+
+> designforge@0.1.0 build
+> node ./scripts/build.mjs
+
+[36mvite v8.1.3 [32mbuilding client environment for production...[36m[39m
+[2K
+transforming...✓ 1780 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                     0.39 kB │ gzip:   0.26 kB
+dist/assets/JetBrainsMono-Regular-CA-Os4ii.woff2   92.38 kB
+dist/assets/JetBrainsMono-Medium-DoKWA_AF.woff2    94.28 kB
+dist/assets/JetBrainsMono-Bold-CUogYd9I.woff2      94.62 kB
+dist/assets/index-B6s44WQ1.css                     21.63 kB │ gzip:   5.48 kB
+dist/assets/index-B65PRfZu.js                     347.14 kB │ gzip: 104.55 kB
+
+[32m✓ built in 1.36s[39m
+SCENARIO_C_EXIT=0
+cleanup: no servers, browsers, tmux sessions, containers, or temp runtime state started

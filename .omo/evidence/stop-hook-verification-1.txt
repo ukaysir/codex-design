@@ -1,0 +1,92 @@
+STOP_HOOK_VERIFICATION_1
+2026-07-07T20:19:18+09:00
+
+1) task-03 rg
+src/App.tsx:2395:  async function startPreviewSafely() {
+src/App.tsx:2432:  async function verifyWorkspace(path: string) {
+src/App.tsx:2697:      const result = await verifyWorkspace(path);
+src/App.tsx:2717:  async function runManualRepair() {
+src/App.tsx:2747:  async function runManualCapture() {
+src/App.tsx:2787:  async function runManualCritique() {
+src/App.tsx:2855:  async function runManualQualityAudit() {
+src/App.tsx:2941:  async function runManualExport() {
+src/App.tsx:3760:              onClick={() => void startPreviewSafely()}
+src/App.tsx:3814:                    <Button className="mt-6" variant="primary" onClick={() => void startPreviewSafely()} disabled={busy || !workspacePath}>
+src/App.tsx:4099:              onClick={() => void startPreviewSafely()}
+src/App.tsx:4735:              onClick={() => void runManualRepair()}
+src/App.tsx:4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
+src/App.tsx:4745:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+src/App.tsx:4749:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+src/App.tsx:4753:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+
+2) task-03 node block check incl preview bridge
+PASS runDesignRequest excludes runtime/manual/preview bridge calls
+
+3) task-08 selection/composer rg
+src/App.tsx:342:function previewFrameSrc(url: string, selectionMode: boolean) {
+src/App.tsx:343:  if (!selectionMode) return url;
+src/App.tsx:1014:  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+src/App.tsx:1015:  const [selectionMode, setSelectionMode] = useState(false);
+src/App.tsx:1017:  const [componentEdit, setComponentEdit] = useState("");
+src/App.tsx:1732:  async function ensurePreviewSelectionBridge(path: string) {
+src/App.tsx:2381:    await ensurePreviewSelectionBridge(path);
+src/App.tsx:3001:      await ensurePreviewSelectionBridge(path);
+src/App.tsx:3107:    const targetedAnchorId = anchorFromRequest(effectiveRequest) || selectedAnchorId || previewSelection?.anchorId || "";
+src/App.tsx:3115:          const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+src/App.tsx:3126:        const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+src/App.tsx:3129:            ? buildTargetedComponentRequest(targetedAnchorId, screenLabel, effectiveRequest, previewSelection)
+src/App.tsx:3587:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+src/App.tsx:3588:    const selectedText = previewSelection?.text.trim() || "";
+src/App.tsx:3591:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+src/App.tsx:3605:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+src/App.tsx:3607:    const screenLabel = previewSelection?.screenLabel || selectedAnchor?.screenLabel || "Generated Screen";
+src/App.tsx:3616:        applyAnchoredClassAdjustment(source, anchorId, previewSelection, (className) =>
+src/App.tsx:3622:  async function runComponentEdit() {
+src/App.tsx:3623:    const note = componentEdit.trim();
+src/App.tsx:3624:    const anchorId = selectedAnchorId || previewSelection?.anchorId || "";
+src/App.tsx:3628:    const screenLabel = previewSelection?.screenLabel || anchor?.screenLabel || "Generated Screen";
+src/App.tsx:3637:    const request = buildTargetedComponentRequest(anchorId, screenLabel, note, previewSelection);
+src/App.tsx:3773:              {selectionMode ? "선택 중" : "선택 수정"}
+src/App.tsx:3800:                  src={previewFrameSrc(preview.url, selectionMode)}
+src/App.tsx:3803:                    selectionMode && "ring-4 ring-[var(--focus-ring)] ring-inset",
+src/App.tsx:3831:      className="relative grid h-screen min-w-0 grid-cols-1 grid-rows-[minmax(280px,42dvh)_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--ink)] lg:min-w-[1180px] lg:grid-cols-[320px_minmax(0,1fr)_380px] lg:grid-rows-none"
+src/App.tsx:3902:              <div data-comment-anchor="hero" className="sticky bottom-0 z-10 rounded-xl border border-[var(--line)] bg-white p-2.5 shadow-[0_6px_18px_rgba(31,41,55,0.05)]">
+src/App.tsx:3910:                {selectedAnchor || previewSelection ? (
+src/App.tsx:3913:                      <span className="font-medium text-[var(--ink)]">selection-ready preview</span>
+src/App.tsx:3916:                    <p className="mt-1 truncate font-mono">{previewSelection?.path?.at(-1) || previewSelection?.tagName || selectedAnchor?.screenLabel || "anchor fallback"}</p>
+src/App.tsx:3917:                    {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+src/App.tsx:4115:              variant={selectionMode ? "primary" : "ghost"}
+src/App.tsx:4157:                src={previewFrameSrc(preview.url, selectionMode)}
+src/App.tsx:4160:                  selectionMode && "ring-4 ring-[var(--focus-ring)]",
+src/App.tsx:4178:                        <p className="text-sm font-semibold text-[var(--primary)]">composer</p>
+src/App.tsx:4543:            <Badge tone={selectedAnchorId ? "lime" : selectionMode ? "cyan" : "steel"}>{selectedAnchorLabel}</Badge>
+src/App.tsx:4555:                variant={selectionMode ? "primary" : "secondary"}
+src/App.tsx:4561:                {selectionMode ? "선택 중" : "클릭 선택"}
+src/App.tsx:4595:            {selectedAnchor || previewSelection ? (
+src/App.tsx:4598:                  <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
+src/App.tsx:4599:                  <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
+src/App.tsx:4601:                {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
+src/App.tsx:4602:                {previewSelection?.path?.length ? <p className="mt-1 truncate font-mono">{previewSelection.path[previewSelection.path.length - 1]}</p> : null}
+src/App.tsx:4609:                <Badge tone={previewSelection?.text ? "lime" : selectedAnchorId ? "cyan" : "steel"}>
+src/App.tsx:4610:                  {previewSelection?.text ? "텍스트 선택" : selectedAnchorId ? "앵커 선택" : "대기"}
+src/App.tsx:4618:                disabled={busy || !previewSelection?.text}
+src/App.tsx:4625:                  disabled={busy || !previewSelection?.text || !selectedTextDraft.trim() || selectedTextDraft.trim() === previewSelection.text.trim()}
+src/App.tsx:4669:              value={componentEdit}
+src/App.tsx:4678:              onClick={() => void runComponentEdit()}
+src/App.tsx:4679:              disabled={busy || !selectedAnchorId || !componentEdit.trim()}
+
+4) task-09 manual-only rg
+2658:  async function captureScreenshot(path: string, url: string) {
+2664:  async function captureConsole(path: string, url: string) {
+2697:      const result = await verifyWorkspace(path);
+2757:        const consoleCapture = await captureConsole(path, preview.url);
+2766:        const screenshotCapture = await captureScreenshot(path, preview.url);
+
+5) imagegen rg
+
+6) evidence sizes
+-rw-r--r-- 1 CKIRUser 197121 1583  7월  7 20:17 .omo/evidence/task-03-design-only-pipeline.txt
+-rw-r--r-- 1 CKIRUser 197121  768  7월  7 20:17 .omo/evidence/task-07-3pane-ui.txt
+-rw-r--r-- 1 CKIRUser 197121 4593  7월  7 20:15 .omo/evidence/task-08-selection-composer.txt
+-rw-r--r-- 1 CKIRUser 197121 1599  7월  7 20:16 .omo/evidence/task-09-manual-tools.txt
+-rw-r--r-- 1 CKIRUser 197121 1955  7월  7 20:18 .omo/evidence/tasks-03-07-08-09-notepad.md

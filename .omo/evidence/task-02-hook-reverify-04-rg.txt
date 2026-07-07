@@ -1,0 +1,2 @@
+src-tauri\src\main.rs:301:        ".designforge/generated-images.json",
+rg: src-tauri\target\debug\build\cookie-ceb29d385d192242\build_script_build-ceb29d385d192242.exe.tmp21c6dac: 액세스가 거부되었습니다. (os error 5)

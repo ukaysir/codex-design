@@ -1,0 +1,10 @@
+src-tauri/src/main.rs:1387:    let typecheck = run_node_tool(&root, &["./node_modules/typescript/bin/tsc", "--noEmit"])?;
+src-tauri/src/main.rs:1392:    let build = run_node_tool(&root, &["./node_modules/vite/bin/vite.js", "build"])?;
+src-tauri/src/main.rs:1435:        .arg("./node_modules/vite/bin/vite.js")
+src-tauri/src/main.rs:2062:        "node_modules/vite/bin/vite.js",
+src-tauri/src/main.rs:2063:        "node_modules/typescript/bin/tsc",
+src-tauri/src/main.rs:2075:        "Missing workspace dependencies.\nRequired local files:\n- {}\nMissing local files:\n- {}\nInstall dependencies manually in this workspace before running preview or verify. DesignForge will not install Node packages automatically.",
+BLOCKER: cargo not available in PATH; cargo check --manifest-path src-tauri/Cargo.toml not run.
+--- cargo availability probe: where.exe cargo ---
+INFO: Could not find files for the given pattern(s).
+where.exe cargo exit code 1: cargo not found in PATH
