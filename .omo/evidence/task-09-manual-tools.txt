@@ -1,19 +1,39 @@
-2395:  async function startPreviewSafely() {
-2432:  async function verifyWorkspace(path: string) {
-2697:      const result = await verifyWorkspace(path);
-2717:  async function runManualRepair() {
-2747:  async function runManualCapture() {
-2787:  async function runManualCritique() {
-2855:  async function runManualQualityAudit() {
-2941:  async function runManualExport() {
-3760:              onClick={() => void startPreviewSafely()}
-3814:                    <Button className="mt-6" variant="primary" onClick={() => void startPreviewSafely()} disabled={busy || !workspacePath}>
-4099:              onClick={() => void startPreviewSafely()}
-4735:              onClick={() => void runManualRepair()}
-4741:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCapture()} disabled={busy || !workspacePath || !preview}>
-4745:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
-4749:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
-4753:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
-2697:      const result = await verifyWorkspace(path);
+# Task 09 manual tools regression - fresh 2026-07-07T22:22:34+09:00
 
-NOTE: await verifyWorkspace(path) is inside runManualVerify, the explicit 검증 실행 button handler; runManualCritique and runManualQualityAudit no longer call verifyWorkspace, captureConsole, or captureScreenshot.
+## manual action references
+2382:  async function verifyWorkspace(path: string) {
+2608:  async function captureScreenshot(path: string, url: string) {
+2614:  async function captureConsole(path: string, url: string) {
+2640:  async function runManualVerify() {
+2647:      const result = await verifyWorkspace(path);
+2707:        const consoleCapture = await captureConsole(path, preview.url);
+2716:        const screenshotCapture = await captureScreenshot(path, preview.url);
+2737:  async function runManualCritique() {
+2805:  async function runManualQualityAudit() {
+2891:  async function runManualExport() {
+4685:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualVerify()} disabled={busy || !workspacePath}>
+4702:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualCritique()} disabled={busy || !workspacePath}>
+4706:            <Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => void runManualQualityAudit()} disabled={busy || !workspacePath}>
+4710:            <Button variant="primary" className="min-h-9 px-3 text-xs" onClick={() => void runManualExport()} disabled={busy || !workspacePath}>
+
+## design request runtime separation
+DESIGN_REQUEST_RUNTIME_PASS
+
+## attachment preservation
+119:const ATTACHMENTS_MANIFEST_PATH = ".designforge/attachments.json";
+120:const ATTACHMENTS_DIR = ".designforge/attachments";
+304:  if (file.type.startsWith("image/")) return "image";
+322:  return `${ATTACHMENTS_DIR}/${id}-${safeAttachmentName(name)}`;
+334:  const prefix = file.type.startsWith("image/") ? "pasted-image" : "pasted-file";
+401:Use these attachments as source material. For image attachments, inspect the saved workspace file path. For text or Markdown attachments, treat the preview above and the saved file as source truth.`;
+1279:      const raw = await callTauri<string>("read_file", { workspacePath: path, relativePath: ATTACHMENTS_MANIFEST_PATH });
+1305:      relativePath: ATTACHMENTS_MANIFEST_PATH,
+1311:  async function addPendingFiles(files: FileList | File[] | null, source: "picker" | "clipboard" = "picker") {
+1369:    await addPendingFiles(files, "clipboard");
+3925:                      id="designforge-attachments"
+3930:                        void addPendingFiles(event.currentTarget.files);
+3939:                      onClick={() => document.getElementById("designforge-attachments")?.click()}
+ATTACHMENT_PRESERVATION_PASS=image attachments remain normal design references
+
+## no hidden package install automation
+NO_AUTO_INSTALL_PASS=yes

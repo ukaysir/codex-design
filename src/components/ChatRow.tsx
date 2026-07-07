@@ -90,8 +90,8 @@ function AgentChatRow({ message, agent }: { message: ChatMessage; agent: AgentCh
         ) : null}
         {(agent.threadId || agent.artifactPath) && (
           <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-[10px] text-[var(--muted)]">
-            {agent.threadId ? <span className="truncate rounded-md bg-[var(--panel-2)] px-2 py-1 font-mono">thread {shortSessionId(agent.threadId)}</span> : null}
-            {agent.artifactPath ? <span className="truncate rounded-md bg-[var(--panel-2)] px-2 py-1 font-mono">{agent.artifactPath}</span> : null}
+            {agent.threadId ? <span className="truncate rounded bg-[var(--panel-2)] px-2 py-1 font-mono">thread {shortSessionId(agent.threadId)}</span> : null}
+            {agent.artifactPath ? <span className="truncate rounded bg-[var(--panel-2)] px-2 py-1 font-mono">{agent.artifactPath}</span> : null}
           </div>
         )}
       </div>
@@ -123,14 +123,16 @@ export function ChatRow({ message }: { message: ChatMessage }) {
             {timestamp}
           </span>
         </div>
-        <p className="whitespace-pre-wrap break-words text-[12px] leading-5 [overflow-wrap:anywhere]">{message.content}</p>
+        <p className="max-w-full whitespace-pre-wrap text-[12px] leading-5 [overflow-wrap:anywhere] sm:break-keep sm:[overflow-wrap:break-word]">
+          {message.content}
+        </p>
         {message.attachments?.length ? (
           <div className="mt-2 grid gap-1">
             {message.attachments.map((attachment) => (
               <div
                 key={attachment.id}
                 className={cn(
-                  "flex min-h-6 items-center justify-between gap-2 rounded-md border px-2 py-1 text-[10px]",
+                  "flex min-h-6 items-center justify-between gap-2 rounded border px-2 py-1 text-[10px]",
                   isUser ? "border-white/20 bg-white/10 text-white/80" : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--muted)]",
                 )}
               >
