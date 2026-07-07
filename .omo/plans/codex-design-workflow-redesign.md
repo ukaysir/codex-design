@@ -206,7 +206,7 @@ Your next move: approve implementation start, or request one more review pass on
   - failure: `rg -n "await runManualCapture\\(|await runManualCritique\\(|await runManualQualityAudit\\(|await verifyWorkspace\\(|await startPreviewSafely\\(" src/App.tsx >> .omo/evidence/task-09-manual-tools.txt`; PASS iff normal design handlers do not call runtime tools and manual critique/quality do not auto-capture or auto-verify.
   Commit: Y | `fix(workflow): make runtime tools manual`
 
-- [ ] 10. Write embedded Image Workspace architecture contract
+- [x] 10. Write embedded Image Workspace architecture contract
   What to do / Must NOT do: Create a detailed internal architecture doc for the later ima2-gen-inspired image rebuild. Do not implement UI, disabled panels, or external service launch in this wave.
   Parallelization: Wave E | Blocked by: 2,5 | Blocks: 11
   References: `.omo/research/ima2-gen/`, new `docs/image-workspace-architecture.md` or `.omo/plans/image-workspace-architecture.md`

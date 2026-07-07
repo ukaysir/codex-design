@@ -1,0 +1,190 @@
+Task 10 Image Workspace Contract Recheck
+Timestamp: 2026-07-07T20:41:49.5092977+09:00
+Repo: C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main
+
+Scenario 1: Required broad contract scan
+Invocation: rg -n "ima2|prompt enhancer|provider|history|queue|embedded|external service|selected design|performance" docs .omo/plans
+Binary observable: exit code is 0 or 1 allowed by spec because command is redirected with || true; artifact must contain matching context output.
+docs\image-workspace-architecture.md:3:Task 10 defines the internal contract for a later ima2-gen-inspired image rebuild inside Codex Design. This document is intentionally architecture-only. This wave does not add product UI, disabled panels, external process launch, or provider calls.
+docs\image-workspace-architecture.md:7:The Image Workspace must be embedded in the existing Codex Design desktop app. It is not an external service, not a sidecar ima2 server, and not a wrapper that asks users to run another local web app. The future implementation may reuse functional patterns observed in `.omo/research/ima2-gen`, but those patterns must be translated into Codex Design's Tauri, React, and project-workspace model.
+docs\image-workspace-architecture.md:13:- no provider network call, API-key prompt, OAuth flow, CLI launch, or server process;
+docs\image-workspace-architecture.md:14:- no external service launcher for ima2-gen or any provider-specific runtime.
+docs\image-workspace-architecture.md:16:The first user-visible image feature should ship only when it can complete a real image task against the selected design slot. Until then, the contract lives in docs only.
+docs\image-workspace-architecture.md:18:## Reference Patterns From ima2-gen
+docs\image-workspace-architecture.md:20:The ima2-gen clone is a reference for functional shape, not copy text or code. Useful patterns to carry forward:
+docs\image-workspace-architecture.md:22:- Dashboard/history: separate browsing history from the active composer so passive selection does not mutate the prompt.
+docs\image-workspace-architecture.md:23:- Prompt studio/enhancer: keep a focused prompt enhancer that rewrites rough intent into provider-ready image prompts while preserving explicit user wording.
+docs\image-workspace-architecture.md:24:- Provider/adapters: hide provider-specific request payloads behind a provider abstraction so the rest of the app speaks one image job contract.
+docs\image-workspace-architecture.md:25:- Queue/progress/cancel: treat generation as a job queue with durable job ids, progress snapshots, and cancellation that can abort queued or running work.
+docs\image-workspace-architecture.md:26:- Asset metadata: persist generated/imported image metadata with enough prompt, provider, design context, and source-slot information to support reuse.
+docs\image-workspace-architecture.md:30:The future Image Workspace is a feature slice inside the DesignForge project workspace. It owns image-specific state, assets, prompts, and generation jobs, but it reads design context from the existing project manifest and selected preview element. It should not own Codex chat history, preview server lifecycle, app-server sessions, or design verification.
+docs\image-workspace-architecture.md:35:   Reads the current project, selected design slot, visible screen, screenshot/capture metadata when available, design tokens, component labels, selected DOM anchor, and current user instruction. It returns a sanitized, serializable context object with no API keys and no raw private logs.
+docs\image-workspace-architecture.md:37:2. `prompt enhancer`
+docs\image-workspace-architecture.md:40:3. `provider abstraction`
+docs\image-workspace-architecture.md:41:   Defines a provider-neutral adapter interface for generation, edit, reference-image, and cancellation. UI and project state must submit `ImageJobRequest` objects; only adapters translate them into provider-specific payloads.
+docs\image-workspace-architecture.md:43:4. `job queue`
+docs\image-workspace-architecture.md:44:   Stores queued, running, completed, failed, and canceled jobs per project. Each job has a stable id, request snapshot, selected design slot target, progress events, cancellation token, provider result metadata, and asset output links.
+docs\image-workspace-architecture.md:47:   Stores generated, imported, and inserted assets under the project workspace. Assets keep sidecar metadata and may later embed metadata in supported image files. The asset library is separate from chat history so image browsing never rewrites conversation state.
+docs\image-workspace-architecture.md:49:6. `history`
+docs\image-workspace-architecture.md:50:   Presents project-local generations and insertions as recoverable history. History must support filtering by project, screen, selected design slot, provider, prompt, and inserted/uninserted status.
+docs\image-workspace-architecture.md:59:- selected design slot id, selected DOM anchor, and component role;
+docs\image-workspace-architecture.md:66:The prompt enhancer must transform that context into a prompt that is specific enough for image generation while still aligned with the design language. For example, if the selected design slot is a compact SaaS dashboard card, the enhanced prompt should bias toward restrained operational imagery, matching palette and density, and avoid unrelated cinematic or decorative output. If the slot is a first-viewport brand hero, the prompt should preserve product subject, composition, and responsive crop requirements.
+docs\image-workspace-architecture.md:80:  providerPrompt: string;
+docs\image-workspace-architecture.md:87:The provider prompt must not include API keys, raw local paths outside the project, hidden app prompts, or private Codex transcripts. It may include design-context extraction summaries that are necessary for visual match.
+docs\image-workspace-architecture.md:91:The API-key boundary is below the provider abstraction and above provider network clients. The future UI can report provider readiness, but it must never expose, log, serialize into history, or embed keys in asset metadata. Keys should live in the existing secure configuration path for the app, not in project files. Project artifacts may store `providerId`, `model`, request id, elapsed time, prompt hash, and safe status fields, but never credentials.
+docs\image-workspace-architecture.md:93:Provider adapters must return typed errors for missing credentials, refused content, unsupported model, quota/rate limit, timeout, and cancellation. The queue and UI should consume those typed errors without parsing provider-specific text.
+docs\image-workspace-architecture.md:97:The job queue is the only path from Image Workspace intent to provider work. Direct provider calls from UI components are forbidden.
+docs\image-workspace-architecture.md:99:Required queue states:
+docs\image-workspace-architecture.md:101:- `queued`: request captured, not yet submitted;
+docs\image-workspace-architecture.md:102:- `enhancing`: prompt enhancer is deriving the provider prompt;
+docs\image-workspace-architecture.md:103:- `running`: provider adapter has accepted the request;
+docs\image-workspace-architecture.md:104:- `progress`: provider or adapter emitted progress; the latest progress snapshot is visible to the workspace;
+docs\image-workspace-architecture.md:107:- `canceled`: user cancellation or app shutdown canceled queued/running work.
+docs\image-workspace-architecture.md:109:Cancellation must work for both queued and running jobs. For queued jobs, cancellation removes or marks the job before provider submission. For running jobs, the queue must call the provider abstraction cancellation hook and record whether upstream abort was acknowledged. A canceled job must never be inserted into the selected design slot automatically.
+docs\image-workspace-architecture.md:111:Progress events must be scoped by job id and project id. The app should tolerate restart/reload by reconciling queue state from project metadata before rendering any run status.
+docs\image-workspace-architecture.md:118:2. `design-context extraction` records the selected design slot, screen, nearby copy, dimensions, style constraints, and insertion target.
+docs\image-workspace-architecture.md:120:4. `prompt enhancer` produces an enhanced prompt and audit summary that explain why the image should fit the current design language.
+docs\image-workspace-architecture.md:121:5. The job queue submits an `ImageJobRequest` through the provider abstraction.
+docs\image-workspace-architecture.md:124:8. The user explicitly inserts the asset into the selected design slot.
+docs\image-workspace-architecture.md:128:No generation result may silently replace a design asset. Insert requires an explicit selected design slot and an explicit user action.
+docs\image-workspace-architecture.md:141:  provider: {
+docs\image-workspace-architecture.md:167:  providerId?: string;
+docs\image-workspace-architecture.md:170:  history: {
+docs\image-workspace-architecture.md:178:The final implementation may adjust exact type names, but it must preserve the boundaries: prompt data is separate from provider credentials, asset metadata is separate from chat records, and selected-slot insertion is separate from generation completion.
+docs\image-workspace-architecture.md:182:The performance budget exists because image work can easily block the design loop.
+docs\image-workspace-architecture.md:184:- Opening a project with image history should not block the main workspace on thumbnail hydration.
+docs\image-workspace-architecture.md:187:- The queue should cap concurrent provider work per project and expose pending/running counts.
+docs\image-workspace-architecture.md:195:- under 250 ms to list the first page of history from project-local metadata;
+docs\image-workspace-architecture.md:198:- no provider request on the UI thread.
+docs\image-workspace-architecture.md:202:Logs may include job id, project id, selected design slot id, provider id, model, elapsed time, byte counts, dimensions, status code, and typed error code. Logs must not include raw API keys, OAuth tokens, private prompt history, raw generated base64, or raw upstream responses.
+docs\image-workspace-architecture.md:207:- provider job queued/running/progress/completed/failed/canceled;
+docs\image-workspace-architecture.md:209:- insertion applied to selected design slot;
+docs\image-workspace-architecture.md:210:- history reconciled after restart.
+docs\image-workspace-architecture.md:216:- Image Workspace remains embedded and not an external service.
+docs\image-workspace-architecture.md:218:- Provider calls go through the provider abstraction.
+docs\image-workspace-architecture.md:219:- Every generation goes through the job queue.
+docs\image-workspace-architecture.md:220:- Prompt generation uses design-context extraction and a prompt enhancer.
+docs\image-workspace-architecture.md:222:- History is project-local and separate from chat history.
+docs\image-workspace-architecture.md:223:- Insert requires an explicit selected design slot.
+docs\image-workspace-architecture.md:225:- The API-key boundary prevents credentials from entering project files, metadata, history, or logs.
+docs\image-workspace-architecture.md:226:- The performance budget is verified with real project data before UI exposure.
+.omo/plans\codex-design-workflow-redesign.md:9:**What it will NOT do:** 기본 디자인 요청에서 preview, browser capture, runtime test, npm install, `tsc --noEmit`, 이미지 생성을 자동 실행하지 않는다. ima2-gen은 이번 wave에서 외부 서비스로 붙이지 않는다.
+.omo/plans\codex-design-workflow-redesign.md:19:> TL;DR (machine): Large/Medium; remove imagegen, make default runs design-only, redesign shell as JetBrains/OpenCode 3-pane, document embedded image workspace.
+.omo/plans\codex-design-workflow-redesign.md:34:  - Left pane: command/chat stream and compact run history.
+.omo/plans\codex-design-workflow-redesign.md:47:  - Write an implementation-ready embedded Image Workspace contract inspired by ima2-gen: prompt enhancer, provider abstraction, job progress, history, asset picking, and context-aware prompt extraction.
+.omo/plans\codex-design-workflow-redesign.md:54:- No external local ima2-gen server launched by DesignForge.
+.omo/plans\codex-design-workflow-redesign.md:97:- Wave E: Write embedded Image Workspace architecture contract for the later ima2-gen rebuild.
+.omo/plans\codex-design-workflow-redesign.md:139:  What to do / Must NOT do: Normal send action should create design prompt, run Codex, refresh source metadata/anchors, update run history, and stop. It must not call preview, capture, critique, quality, repair, export, dependency install, `npm run typecheck`, or `tsc --noEmit`.
+.omo/plans\codex-design-workflow-redesign.md:209:- [ ] 10. Write embedded Image Workspace architecture contract
+.omo/plans\codex-design-workflow-redesign.md:210:  What to do / Must NOT do: Create a detailed internal architecture doc for the later ima2-gen-inspired image rebuild. Do not implement UI, disabled panels, or external service launch in this wave.
+.omo/plans\codex-design-workflow-redesign.md:212:  References: `.omo/research/ima2-gen/`, new `docs/image-workspace-architecture.md` or `.omo/plans/image-workspace-architecture.md`
+.omo/plans\codex-design-workflow-redesign.md:213:  Acceptance criteria: Contract covers design-context extraction, prompt enhancer pipeline, provider abstraction, API-key boundary, job queue/progress/history, asset library, insert-into-selected-slot flow, cancellation, and performance budget.
+.omo/plans\codex-design-workflow-redesign.md:215:  - happy: `rg -n "ima2|prompt enhancer|provider|history|queue|embedded|external service|selected design|performance" docs .omo/plans > .omo/evidence/task-10-image-workspace-contract.txt`
+.omo/plans\codex-design-workflow-redesign.md:216:  - failure: `test -s docs/image-workspace-architecture.md && rg -n "embedded|prompt enhancer|provider abstraction|job queue|history|selected design slot|performance budget|not an external service|no disabled image UI" docs/image-workspace-architecture.md >> .omo/evidence/task-10-image-workspace-contract.txt`; PASS iff every required contract term is present and `rg -n "Image Workspace|coming soon|disabled image" src/App.tsx` returns no exposed product UI.
+.omo/plans\codex-design-workflow-redesign.md:217:  Commit: Y | `docs(image): plan embedded workspace`
+.omo/plans\codex-design-workflow-redesign.md:247:- Commit 8: `docs(image): plan embedded workspace`
+.omo/plans\codex-design-workflow-redesign.md:256:- Future ima2-gen-inspired image generation has a concrete embedded architecture plan without shipping unfinished UI.
+ExitCode: 0
+
+Scenario 2: Required docs file exists and contains required contract terms
+Invocation: test -s docs/image-workspace-architecture.md && rg -n "embedded|prompt enhancer|provider abstraction|job queue|history|selected design slot|performance budget|not an external service|no disabled image UI" docs/image-workspace-architecture.md
+Binary observable: file exists, non-empty, and rg exits 0 with matches for every required alternation term.
+DocExists: True Length: 13100
+7:The Image Workspace must be embedded in the existing Codex Design desktop app. It is not an external service, not a sidecar ima2 server, and not a wrapper that asks users to run another local web app. The future implementation may reuse functional patterns observed in `.omo/research/ima2-gen`, but those patterns must be translated into Codex Design's Tauri, React, and project-workspace model.
+11:- no disabled image UI in `src/App.tsx` or any exposed product route;
+16:The first user-visible image feature should ship only when it can complete a real image task against the selected design slot. Until then, the contract lives in docs only.
+22:- Dashboard/history: separate browsing history from the active composer so passive selection does not mutate the prompt.
+23:- Prompt studio/enhancer: keep a focused prompt enhancer that rewrites rough intent into provider-ready image prompts while preserving explicit user wording.
+24:- Provider/adapters: hide provider-specific request payloads behind a provider abstraction so the rest of the app speaks one image job contract.
+25:- Queue/progress/cancel: treat generation as a job queue with durable job ids, progress snapshots, and cancellation that can abort queued or running work.
+30:The future Image Workspace is a feature slice inside the DesignForge project workspace. It owns image-specific state, assets, prompts, and generation jobs, but it reads design context from the existing project manifest and selected preview element. It should not own Codex chat history, preview server lifecycle, app-server sessions, or design verification.
+35:   Reads the current project, selected design slot, visible screen, screenshot/capture metadata when available, design tokens, component labels, selected DOM anchor, and current user instruction. It returns a sanitized, serializable context object with no API keys and no raw private logs.
+37:2. `prompt enhancer`
+40:3. `provider abstraction`
+43:4. `job queue`
+44:   Stores queued, running, completed, failed, and canceled jobs per project. Each job has a stable id, request snapshot, selected design slot target, progress events, cancellation token, provider result metadata, and asset output links.
+47:   Stores generated, imported, and inserted assets under the project workspace. Assets keep sidecar metadata and may later embed metadata in supported image files. The asset library is separate from chat history so image browsing never rewrites conversation state.
+49:6. `history`
+50:   Presents project-local generations and insertions as recoverable history. History must support filtering by project, screen, selected design slot, provider, prompt, and inserted/uninserted status.
+59:- selected design slot id, selected DOM anchor, and component role;
+66:The prompt enhancer must transform that context into a prompt that is specific enough for image generation while still aligned with the design language. For example, if the selected design slot is a compact SaaS dashboard card, the enhanced prompt should bias toward restrained operational imagery, matching palette and density, and avoid unrelated cinematic or decorative output. If the slot is a first-viewport brand hero, the prompt should preserve product subject, composition, and responsive crop requirements.
+91:The API-key boundary is below the provider abstraction and above provider network clients. The future UI can report provider readiness, but it must never expose, log, serialize into history, or embed keys in asset metadata. Keys should live in the existing secure configuration path for the app, not in project files. Project artifacts may store `providerId`, `model`, request id, elapsed time, prompt hash, and safe status fields, but never credentials.
+97:The job queue is the only path from Image Workspace intent to provider work. Direct provider calls from UI components are forbidden.
+102:- `enhancing`: prompt enhancer is deriving the provider prompt;
+109:Cancellation must work for both queued and running jobs. For queued jobs, cancellation removes or marks the job before provider submission. For running jobs, the queue must call the provider abstraction cancellation hook and record whether upstream abort was acknowledged. A canceled job must never be inserted into the selected design slot automatically.
+118:2. `design-context extraction` records the selected design slot, screen, nearby copy, dimensions, style constraints, and insertion target.
+120:4. `prompt enhancer` produces an enhanced prompt and audit summary that explain why the image should fit the current design language.
+121:5. The job queue submits an `ImageJobRequest` through the provider abstraction.
+124:8. The user explicitly inserts the asset into the selected design slot.
+128:No generation result may silently replace a design asset. Insert requires an explicit selected design slot and an explicit user action.
+170:  history: {
+182:The performance budget exists because image work can easily block the design loop.
+184:- Opening a project with image history should not block the main workspace on thumbnail hydration.
+195:- under 250 ms to list the first page of history from project-local metadata;
+202:Logs may include job id, project id, selected design slot id, provider id, model, elapsed time, byte counts, dimensions, status code, and typed error code. Logs must not include raw API keys, OAuth tokens, private prompt history, raw generated base64, or raw upstream responses.
+207:- provider job queued/running/progress/completed/failed/canceled;
+209:- insertion applied to selected design slot;
+210:- history reconciled after restart.
+216:- Image Workspace remains embedded and not an external service.
+218:- Provider calls go through the provider abstraction.
+219:- Every generation goes through the job queue.
+220:- Prompt generation uses design-context extraction and a prompt enhancer.
+222:- History is project-local and separate from chat history.
+223:- Insert requires an explicit selected design slot.
+225:- The API-key boundary prevents credentials from entering project files, metadata, history, or logs.
+226:- The performance budget is verified with real project data before UI exposure.
+ExitCode: 0
+
+Scenario 3: No exposed product UI in App
+Invocation: rg -n "Image Workspace|coming soon|disabled image" src/App.tsx
+Binary observable: rg exits 1 with no output, proving no matching exposed App UI string.
+<no matches>
+ExitCode: 1
+
+Scenario 4: Required terms including concepts beyond verification regex
+Invocation: rg -n "design-context extraction|API-key boundary|asset library|insert-into-selected-slot flow|cancellation|progress|design language" docs/image-workspace-architecture.md
+Binary observable: rg exits 0 and shows all additional required concepts in the contract.
+25:- Queue/progress/cancel: treat generation as a job queue with durable job ids, progress snapshots, and cancellation that can abort queued or running work.
+34:1. `design-context extraction`
+38:   Converts extracted design context plus user image intent into a generation prompt that matches the current design language. The enhancer should preserve explicit user constraints, reject unsupported hidden assumptions, and output structured fields such as subject, placement, style cues, palette, format, negative constraints, and slot fit.
+41:   Defines a provider-neutral adapter interface for generation, edit, reference-image, and cancellation. UI and project state must submit `ImageJobRequest` objects; only adapters translate them into provider-specific payloads.
+44:   Stores queued, running, completed, failed, and canceled jobs per project. Each job has a stable id, request snapshot, selected design slot target, progress events, cancellation token, provider result metadata, and asset output links.
+46:5. `asset library`
+47:   Stores generated, imported, and inserted assets under the project workspace. Assets keep sidecar metadata and may later embed metadata in supported image files. The asset library is separate from chat history so image browsing never rewrites conversation state.
+54:The central contract is how Codex Design context becomes image prompts that match the current design language.
+66:The prompt enhancer must transform that context into a prompt that is specific enough for image generation while still aligned with the design language. For example, if the selected design slot is a compact SaaS dashboard card, the enhanced prompt should bias toward restrained operational imagery, matching palette and density, and avoid unrelated cinematic or decorative output. If the slot is a first-viewport brand hero, the prompt should preserve product subject, composition, and responsive crop requirements.
+87:The provider prompt must not include API keys, raw local paths outside the project, hidden app prompts, or private Codex transcripts. It may include design-context extraction summaries that are necessary for visual match.
+91:The API-key boundary is below the provider abstraction and above provider network clients. The future UI can report provider readiness, but it must never expose, log, serialize into history, or embed keys in asset metadata. Keys should live in the existing secure configuration path for the app, not in project files. Project artifacts may store `providerId`, `model`, request id, elapsed time, prompt hash, and safe status fields, but never credentials.
+93:Provider adapters must return typed errors for missing credentials, refused content, unsupported model, quota/rate limit, timeout, and cancellation. The queue and UI should consume those typed errors without parsing provider-specific text.
+104:- `progress`: provider or adapter emitted progress; the latest progress snapshot is visible to the workspace;
+107:- `canceled`: user cancellation or app shutdown canceled queued/running work.
+109:Cancellation must work for both queued and running jobs. For queued jobs, cancellation removes or marks the job before provider submission. For running jobs, the queue must call the provider abstraction cancellation hook and record whether upstream abort was acknowledged. A canceled job must never be inserted into the selected design slot automatically.
+115:The insert-into-selected-slot flow is the first full workflow the later implementation must support.
+118:2. `design-context extraction` records the selected design slot, screen, nearby copy, dimensions, style constraints, and insertion target.
+120:4. `prompt enhancer` produces an enhanced prompt and audit summary that explain why the image should fit the current design language.
+122:6. The adapter emits progress and terminal status.
+123:7. The asset library stores the image and metadata.
+185:- The asset library should load summaries first and image bytes lazily.
+186:- Prompt enhancement should run as a bounded job step with visible progress when it takes noticeable time.
+190:- The insert-into-selected-slot flow should update only the target asset reference and nearby code needed for that slot, not regenerate the full screen.
+196:- under 500 ms for design-context extraction on a normal generated workspace;
+207:- provider job queued/running/progress/completed/failed/canceled;
+220:- Prompt generation uses design-context extraction and a prompt enhancer.
+221:- Generated assets land in the asset library before insertion.
+224:- Progress and cancellation are first-class job behavior.
+225:- The API-key boundary prevents credentials from entering project files, metadata, history, or logs.
+ExitCode: 0
+
+Scenario 5: Scope check
+Invocation: git status --short
+Binary observable: only docs/evidence additions relevant to this task are present; pre-existing .omo/research and .omo/drafts remain unrelated untracked inputs.
+?? .omo/drafts/
+?? .omo/evidence/task-10-image-workspace-contract-recheck.txt
+?? .omo/evidence/task-10-image-workspace-contract.txt
+?? .omo/research/
+?? docs/
+ExitCode: 0
+
+Judgment:
+PASS: True
+Reason: docs/image-workspace-architecture.md exists and contains the required contract terms/concepts; src/App.tsx has no Image Workspace/coming soon/disabled image matches; evidence artifact is non-empty.

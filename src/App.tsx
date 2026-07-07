@@ -251,8 +251,8 @@ function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-65 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
-        variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_8px_18px_rgba(49,130,246,0.18)] hover:bg-[var(--primary-strong)]",
+        "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-65 focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+        variant === "primary" && "border border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] hover:bg-[var(--primary-strong)]",
         variant === "secondary" &&
           "border border-[var(--line-strong)] bg-white text-[var(--ink)] hover:border-[var(--accent)] hover:bg-white hover:text-[var(--accent)]",
         variant === "ghost" && "border border-transparent text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--accent)]",
@@ -272,17 +272,17 @@ function Badge({
   tone?: "lime" | "cyan" | "amber" | "danger" | "steel";
 }) {
   const styles = {
-    lime: "border-blue-100 bg-blue-50 text-[var(--primary-strong)]",
+    lime: "border-[var(--line-strong)] bg-[var(--panel-2)] text-[var(--primary-strong)]",
     cyan: "border-[var(--primary)] bg-[var(--primary)] text-white",
-    amber: "border-amber-200 bg-amber-50 text-amber-800",
-    danger: "border-red-200 bg-red-50 text-red-700",
+    amber: "border-[var(--warning)] bg-[var(--panel-2)] text-[var(--ink)]",
+    danger: "border-[var(--danger)] bg-[var(--panel-2)] text-[var(--danger)]",
     steel: "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)]",
   };
 
   return (
     <span
       className={cn(
-        "inline-flex min-h-7 shrink-0 items-center whitespace-nowrap rounded-full border px-3 text-[11px] font-semibold",
+        "inline-flex min-h-7 shrink-0 items-center whitespace-nowrap rounded border px-3 text-[11px] font-semibold",
         styles[tone],
       )}
     >
@@ -3751,7 +3751,7 @@ ${effectiveRequest}`;
             <h1 className="truncate text-xl font-bold text-[var(--ink-strong)]">작업물 미리보기</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded-full border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
+            <span className="rounded border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
               {ARTIFACT_VIEWPORT_WIDTH} x {ARTIFACT_VIEWPORT_HEIGHT}
             </span>
             <Button
@@ -3791,7 +3791,7 @@ ${effectiveRequest}`;
               <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비 필요"} · Ctrl+Shift+P 토글 · Esc 닫기</span>
             </div>
             <div
-              className="overflow-hidden bg-white shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+              className="overflow-hidden bg-white"
               style={{ width: ARTIFACT_VIEWPORT_WIDTH, height: ARTIFACT_VIEWPORT_HEIGHT }}
             >
               {preview ? (
@@ -3828,17 +3828,17 @@ ${effectiveRequest}`;
   return (
     <div
       data-screen-label="designforge-workbench"
-      className="relative grid h-screen min-w-0 grid-cols-1 grid-rows-[minmax(280px,42dvh)_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--ink)] lg:min-w-[1180px] lg:grid-cols-[320px_minmax(0,1fr)_380px] lg:grid-rows-none"
+      className="relative grid min-h-dvh min-w-0 grid-cols-1 overflow-x-hidden overflow-y-auto bg-[var(--bg)] text-[var(--ink)] lg:h-dvh lg:grid-cols-[320px_minmax(0,1fr)_380px] lg:overflow-hidden"
     >
       <aside
         data-comment-anchor="navigation"
-        className="flex min-h-0 flex-col overflow-y-auto border-b border-[var(--line)] bg-[#fbfaf7] px-4 py-3 lg:border-b-0 lg:border-r"
+        className="flex max-h-[72dvh] min-h-0 min-w-0 flex-col overflow-y-auto overflow-x-hidden border-b border-[var(--line)] bg-[var(--panel)] px-4 py-3 lg:h-dvh lg:max-h-none lg:border-b-0 lg:border-r"
       >
         <header className="flex min-h-10 items-center justify-between">
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary)] text-white shadow-[0_8px_18px_rgba(49,130,246,0.18)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-[var(--primary)] text-white focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
               onClick={() => setShowProjectPanel(true)}
               title="프로젝트 목록"
               aria-label="프로젝트 목록"
@@ -3858,7 +3858,7 @@ ${effectiveRequest}`;
           </div>
           <button
             type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-[var(--muted)] transition hover:bg-white hover:text-[var(--ink)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
+            className="flex h-8 w-8 items-center justify-center rounded border border-transparent text-[var(--muted)] transition hover:bg-white hover:text-[var(--ink)] focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]"
             onClick={() => setChatPanelTab((current) => (current === "conversation" ? "history" : "conversation"))}
             title={chatPanelTab === "conversation" ? "작업 기록 보기" : "대화로 돌아가기"}
             aria-label={chatPanelTab === "conversation" ? "작업 기록 보기" : "대화로 돌아가기"}
@@ -3867,7 +3867,7 @@ ${effectiveRequest}`;
           </button>
         </header>
 
-        <section className="mt-3 rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs leading-5 text-[var(--muted)]">
+        <section className="mt-3 rounded border border-[var(--line)] bg-white px-3 py-2 text-xs leading-5 text-[var(--muted)]">
           <div className="flex items-center justify-between gap-2">
             <span className="font-medium text-[var(--ink)]">현재 프로젝트</span>
             <Badge tone={workspacePath ? "lime" : "steel"}>{workspacePath ? "연결됨" : "대기"}</Badge>
@@ -3899,16 +3899,16 @@ ${effectiveRequest}`;
                 </div>
               </div>
 
-              <div data-comment-anchor="hero" className="sticky bottom-0 z-10 rounded-xl border border-[var(--line)] bg-white p-2.5 shadow-[0_6px_18px_rgba(31,41,55,0.05)]">
+              <div data-comment-anchor="hero" className="sticky bottom-0 z-10 rounded border border-[var(--line)] bg-white p-2.5">
                 {guidedDraft ? (
-                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--charcoal)]">
+                  <div className="mb-2 rounded border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--charcoal)]">
                     <p className="font-medium text-[var(--ink)]">질문에 답변 중</p>
                     <p className="mt-1 line-clamp-2">{guidedDraft.request}</p>
                   </div>
                 ) : null}
 
                 {selectedAnchor || previewSelection ? (
-                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--muted)]">
+                  <div className="mb-2 rounded border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--muted)]">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-[var(--ink)]">selection-ready preview</span>
                       <Badge tone="lime">{selectedAnchorLabel}</Badge>
@@ -3917,7 +3917,7 @@ ${effectiveRequest}`;
                     {previewSelection?.text ? <p className="mt-1 line-clamp-2 text-[var(--ink)]">{previewSelection.text}</p> : null}
                   </div>
                 ) : anchors.length ? (
-                  <div className="mb-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--muted)]">
+                  <div className="mb-2 rounded border border-[var(--line)] bg-[var(--panel-2)] px-2.5 py-2 text-[11px] leading-4 text-[var(--muted)]">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-[var(--ink)]">anchor fallback</span>
                       <Badge tone="steel">{anchors.length} anchors</Badge>
@@ -3937,7 +3937,7 @@ ${effectiveRequest}`;
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runChat();
                   }}
-                  className="min-h-[72px] max-h-32 w-full resize-none rounded-xl border border-[var(--line-strong)] bg-white px-3 py-2.5 text-[12px] leading-5 text-[var(--ink)] outline-none placeholder:text-[12px] placeholder:text-[var(--mute)] shadow-[0_6px_18px_rgba(31,41,55,0.045)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+                  className="min-h-[72px] max-h-32 w-full resize-none rounded border border-[var(--line-strong)] bg-white px-3 py-2.5 text-[12px] leading-5 text-[var(--ink)] outline-none placeholder:text-[12px] placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
                   placeholder={
                     guidedDraft
                       ? "위 질문에 답변하세요. 모르는 항목은 '알아서 판단'이라고 적어도 됩니다."
@@ -3951,7 +3951,7 @@ ${effectiveRequest}`;
                     {pendingAttachments.map((attachment) => (
                       <div
                         key={attachment.id}
-                        className="flex min-h-7 items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-2.5 text-[11px] text-[var(--charcoal)]"
+                        className="flex min-h-7 items-center justify-between gap-2 rounded border border-[var(--line)] bg-[var(--panel-2)] px-2.5 text-[11px] text-[var(--charcoal)]"
                       >
                         <span className="min-w-0 truncate">
                           {attachment.kind} · {attachment.name}
@@ -4031,7 +4031,7 @@ ${effectiveRequest}`;
                   </div>
                   <div className="grid gap-3">
                     {activityMessages.length === 0 && (
-                      <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm text-[var(--muted)]">
+                      <div className="rounded border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm text-[var(--muted)]">
                         아직 분리된 작업 로그가 없습니다.
                       </div>
                     )}
@@ -4051,12 +4051,12 @@ ${effectiveRequest}`;
                   </div>
                   <div className="grid gap-3">
                     {runHistory.length === 0 && (
-                      <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm text-[var(--muted)]">
+                      <div className="rounded border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm text-[var(--muted)]">
                         기록된 실행이 없습니다.
                       </div>
                     )}
                     {runHistory.map((run) => (
-                      <div key={run.id} className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                      <div key={run.id} className="rounded border border-[var(--line)] bg-[var(--panel-2)] p-4">
                         <div className="mb-3 flex items-center justify-between gap-2 text-xs">
                           <Badge tone={runTone(run.status)}>
                             {run.status === "success" ? "success" : "error"}
@@ -4089,7 +4089,7 @@ ${effectiveRequest}`;
 
       </aside>
 
-      <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col bg-white">
+      <main data-comment-anchor="preview" className="flex min-h-0 min-w-0 flex-col overflow-x-hidden bg-white lg:h-dvh">
         <div className="flex min-h-14 items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge tone={preview ? "lime" : busy ? "cyan" : "steel"}>{preview ? "미리보기 활성" : busy ? "생성 중" : "대기"}</Badge>
@@ -4130,7 +4130,7 @@ ${effectiveRequest}`;
               <Maximize2 size={14} />
               작업물 보기
             </Button>
-            <span className="shrink-0 whitespace-nowrap rounded-full border border-[var(--line)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
+            <span className="shrink-0 whitespace-nowrap rounded border border-[var(--line)] px-3 py-2 font-mono text-xs text-[var(--muted)]">
               {ARTIFACT_VIEWPORT_WIDTH}x{ARTIFACT_VIEWPORT_HEIGHT}
             </span>
           </div>
@@ -4145,8 +4145,8 @@ ${effectiveRequest}`;
           </Button>
         </div>
 
-        <section className="min-h-0 flex-1 overflow-auto bg-[var(--panel-2)] p-4">
-          <div className="mx-auto flex max-h-full w-full max-w-none flex-col overflow-hidden rounded-[24px] border border-[var(--line)] bg-white shadow-[0_18px_48px_rgba(31,41,55,0.06)]">
+        <section className="min-h-0 min-w-0 flex-1 overflow-auto overflow-x-hidden bg-[var(--panel-2)] p-3 sm:p-4">
+          <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-none flex-col overflow-hidden rounded border border-[var(--line)] bg-white">
             <div className="flex min-h-14 items-center justify-between border-b border-[var(--line)] bg-white px-5 text-xs text-[var(--muted)]">
               <span className="truncate font-mono">{ARTIFACT_PATH}</span>
               <span>{preview ? `HTTP ${preview.statusCode}` : "미리보기 준비"}</span>
@@ -4156,28 +4156,28 @@ ${effectiveRequest}`;
                 title="Workspace preview"
                 src={previewFrameSrc(preview.url, selectionMode)}
                 className={cn(
-                  "h-[min(76vh,820px)] w-full bg-white",
+                  "min-h-[520px] w-full flex-1 bg-white lg:min-h-0",
                   selectionMode && "ring-4 ring-[var(--focus-ring)]",
                 )}
               />
             ) : (
-              <div className="min-h-[560px] bg-[var(--panel-2)] p-5 text-[var(--ink)]">
-                <div className="overflow-hidden rounded-[22px] border border-[var(--line)] bg-white">
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto overflow-x-hidden bg-[var(--panel-2)] p-3 text-[var(--ink)] sm:p-4">
+                <div className="min-w-0 overflow-hidden rounded border border-[var(--line)] bg-white">
                   <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
+                      <span className="h-2.5 w-2.5 bg-[var(--primary)]" />
                       <span className="truncate font-mono text-xs text-[var(--charcoal)]">
                         artifact://designforge-workbench
                       </span>
                     </div>
                     <Badge tone="steel">anchors visible</Badge>
                   </div>
-                  <div className="grid gap-4 p-4 lg:grid-cols-[1fr_220px]">
-                    <div className="space-y-4">
-                      <div className="rounded-[22px] border border-[var(--line)] bg-white p-6">
+                  <div className="grid min-w-0 grid-cols-1 gap-4 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="min-w-0 space-y-4 overflow-hidden">
+                      <div className="min-w-0 overflow-hidden rounded border border-[var(--line)] bg-white p-4 sm:p-6">
                         <p className="text-sm font-semibold text-[var(--primary)]">composer</p>
-                        <h3 className="mt-3 max-w-2xl break-keep text-3xl font-bold leading-tight tracking-normal text-[var(--ink-strong)]">
-                          요청에서 검증까지 한 화면에서 이어지는 DesignForge
+                        <h3 className="mt-3 max-w-2xl break-keep text-2xl font-bold leading-tight tracking-normal text-[var(--ink-strong)] sm:text-3xl">
+                          요청부터 검증까지 이어지는 <span className="whitespace-nowrap">DesignForge</span>
                         </h3>
                         <p className="mt-4 max-w-2xl text-sm leading-6 text-[var(--muted)]">
                           사용자는 한국어로 변경 의도를 남기고, 시스템은 디자인 기준과 컴포넌트 앵커를 보존한 채 React/Tailwind 산출물을 갱신합니다.
@@ -4190,7 +4190,7 @@ ${effectiveRequest}`;
 
                       <div className="grid gap-3 md:grid-cols-3">
                         {["요청 해석", "시스템 갱신", "빌드 확인"].map((item, index) => (
-                          <div key={item} className="rounded-[20px] border border-[var(--line)] bg-white p-4">
+                          <div key={item} className="min-w-0 rounded-md border border-[var(--line)] bg-white p-4">
                             <p className="font-mono text-xs text-[var(--mute)]">0{index + 1}</p>
                             <p className="mt-5 text-sm font-medium text-[var(--ink)]">{item}</p>
                           </div>
@@ -4198,7 +4198,7 @@ ${effectiveRequest}`;
                       </div>
                     </div>
 
-                    <div className="rounded-[22px] border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                    <div className="min-w-0 overflow-hidden rounded border border-[var(--line)] bg-[var(--panel-2)] p-4">
                       <p className="font-mono text-xs text-[var(--muted)]">outline</p>
                       <div className="mt-4 space-y-2">
                         {(anchors.length ? anchors : [{ id: "navigation", line: 0 } as AnchorInfo]).slice(0, 8).map((anchor) => (
@@ -4206,7 +4206,7 @@ ${effectiveRequest}`;
                             key={anchor.id}
                             className="flex items-center justify-between gap-2 border-b border-[var(--line)] pb-2 last:border-b-0"
                           >
-                            <code className="text-xs text-[var(--ink)]">{anchor.id}</code>
+                            <code className="min-w-0 truncate text-xs text-[var(--ink)]">{anchor.id}</code>
                             <span className="text-xs text-[var(--muted)]">{anchor.line ? `L${anchor.line}` : "ready"}</span>
                           </div>
                         ))}
@@ -4239,7 +4239,7 @@ ${effectiveRequest}`;
           />
           <aside
             data-comment-anchor="project-list"
-            className="fixed bottom-16 left-4 top-4 z-30 flex w-[410px] min-h-0 flex-col overflow-y-auto overflow-x-hidden rounded-[24px] border border-[var(--line)] bg-white px-5 py-5 shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
+            className="fixed bottom-16 left-4 right-4 top-4 z-30 flex min-h-0 w-auto flex-col overflow-y-auto overflow-x-hidden rounded border border-[var(--line)] bg-white px-5 py-5 sm:right-auto sm:w-[410px]"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -4251,7 +4251,7 @@ ${effectiveRequest}`;
               </Button>
             </div>
 
-            <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--muted)]">
+            <div className="mt-4 rounded border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2 text-xs leading-5 text-[var(--muted)]">
               <p className="font-medium text-[var(--ink)]">프로젝트 루트</p>
               <p className="truncate font-mono">{projectRootPath}</p>
             </div>
@@ -4264,7 +4264,7 @@ ${effectiveRequest}`;
                 id="new-project-name"
                 value={newProjectName}
                 onChange={(event) => setNewProjectName(event.target.value)}
-                className="min-h-10 w-full rounded-xl border border-[var(--line-strong)] bg-white px-3 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+                className="min-h-10 w-full rounded border border-[var(--line-strong)] bg-white px-3 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--focus-ring)]"
                 placeholder="프로젝트 이름"
                 disabled={busy}
               />
@@ -4290,7 +4290,7 @@ ${effectiveRequest}`;
               </Button>
             </div>
 
-            <label className="mt-3 flex min-h-10 items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-3 text-xs text-[var(--muted)]" htmlFor="project-search">
+            <label className="mt-3 flex min-h-10 items-center gap-2 rounded border border-[var(--line)] bg-[var(--panel-2)] px-3 text-xs text-[var(--muted)]" htmlFor="project-search">
               <Search size={14} className="shrink-0" />
               <input
                 id="project-search"
@@ -4304,12 +4304,12 @@ ${effectiveRequest}`;
 
             <div className="mt-3 grid gap-2">
               {projects.length === 0 ? (
-                <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
+                <div className="rounded border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
                   아직 생성된 프로젝트가 없습니다. 새 프로젝트를 만들면 독립된 채팅, 작업 기록, DESIGN.md, 생성 결과물을 갖는 디렉토리가 생성됩니다.
                 </div>
               ) : null}
               {projects.length > 0 && filteredProjects.length === 0 ? (
-                <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
+                <div className="rounded border border-[var(--line)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--muted)]">
                   검색 결과가 없습니다.
                 </div>
               ) : null}
@@ -4319,12 +4319,12 @@ ${effectiveRequest}`;
                   <button
                     key={project.path}
                     type="button"
-                    className={cn(
-                      "w-full min-w-0 overflow-hidden rounded-xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] focus:ring-inset",
-                      active
-                        ? "border-[var(--primary)] bg-blue-50"
-                        : "border-[var(--line)] bg-white hover:border-[var(--primary)] hover:bg-[var(--panel-2)]",
-                    )}
+              className={cn(
+                "w-full min-w-0 overflow-hidden rounded border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] focus:ring-inset",
+                active
+                  ? "border-[var(--primary)] bg-[var(--panel-2)]"
+                  : "border-[var(--line)] bg-white hover:border-[var(--primary)] hover:bg-[var(--panel-2)]",
+              )}
                     onClick={() => void switchProject(project.path)}
                     disabled={busy}
                   >
@@ -4366,11 +4366,11 @@ ${effectiveRequest}`;
         <aside
           data-comment-anchor="pipeline-status"
           className={cn(
-            "min-h-0 flex-col overflow-y-auto border border-[var(--line)] bg-[var(--panel-dark)] px-5 py-6",
+            "min-h-0 min-w-0 flex-col overflow-y-auto border border-[var(--line)] bg-[var(--panel-dark)] px-5 py-6",
             showPipelinePanel
-              ? "fixed bottom-16 right-4 top-4 z-30 flex w-[min(380px,calc(100vw-2rem))] rounded-[28px] shadow-[0_24px_70px_rgba(31,41,55,0.18)]"
+              ? "fixed bottom-16 right-4 top-4 z-30 flex w-[min(380px,calc(100vw-2rem))] rounded"
               : "hidden",
-            "lg:static lg:z-auto lg:flex lg:w-auto lg:rounded-none lg:border-y-0 lg:border-r-0 lg:px-4 lg:shadow-none",
+            "lg:static lg:z-auto lg:flex lg:h-dvh lg:w-auto lg:rounded-none lg:border-y-0 lg:border-r-0 lg:px-4 lg:shadow-none",
           )}
         >
         <div className="flex items-center justify-between">
@@ -4390,7 +4390,7 @@ ${effectiveRequest}`;
           </div>
         </div>
 
-        <section data-comment-anchor="codex-wrapper" className="mt-5 rounded-[22px] border border-[var(--line)] bg-white p-4 shadow-[0_12px_30px_rgba(31,41,55,0.04)]">
+        <section data-comment-anchor="codex-wrapper" className="mt-5 rounded border border-[var(--line)] bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-[var(--primary)]">codex wrapper</p>
@@ -4407,7 +4407,7 @@ ${effectiveRequest}`;
                 onClick={() => patchSettings({ codexRuntime: runtime })}
                 disabled={busy}
                 className={cn(
-                  "min-h-9 rounded-xl border px-3 text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                  "min-h-9 rounded border px-3 text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
                   codexRuntime === runtime
                     ? "border-[var(--primary)] bg-[var(--primary)] text-white"
                     : "border-[var(--line)] bg-[var(--panel-2)] text-[var(--charcoal)] hover:border-[var(--primary)]",
@@ -4422,7 +4422,7 @@ ${effectiveRequest}`;
             <Button
               type="button"
               variant="secondary"
-              className="min-h-8 rounded-xl px-2 text-[10px]"
+              className="min-h-8 rounded px-2 text-[10px]"
               onClick={() => void refreshCodexServerStatus()}
               disabled={!workspacePath}
             >
@@ -4431,7 +4431,7 @@ ${effectiveRequest}`;
             <Button
               type="button"
               variant="secondary"
-              className="min-h-8 rounded-xl px-2 text-[10px]"
+              className="min-h-8 rounded px-2 text-[10px]"
               onClick={() => void stopPersistentCodexServer()}
               disabled={!codexServerRunning || busy}
             >
@@ -4440,7 +4440,7 @@ ${effectiveRequest}`;
             <Button
               type="button"
               variant="secondary"
-              className="min-h-8 rounded-xl px-2 text-[10px]"
+              className="min-h-8 rounded px-2 text-[10px]"
               onClick={() => void resetPersistentCodexSession()}
               disabled={!workspacePath || busy}
             >
@@ -4456,7 +4456,7 @@ ${effectiveRequest}`;
                 list="codex-model-options"
                 value={settings.codexModel}
                 onChange={(event) => patchSettings({ codexModel: event.target.value })}
-                className="min-h-10 rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] px-3 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+                className="min-h-10 rounded border border-[var(--line-strong)] bg-[var(--panel-2)] px-3 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
                 placeholder="CLI default"
                 disabled={busy}
               />
@@ -4473,7 +4473,7 @@ ${effectiveRequest}`;
                 id="codex-effort"
                 value={settings.codexEffort}
                 onChange={(event) => patchSettings({ codexEffort: event.target.value as CodexEffort })}
-                className="min-h-10 rounded-xl border border-[var(--line-strong)] bg-[var(--panel-2)] px-3 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+                className="min-h-10 rounded border border-[var(--line-strong)] bg-[var(--panel-2)] px-3 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
                 disabled={busy}
               >
                 {CODEX_EFFORT_OPTIONS.map((effort) => (
@@ -4486,16 +4486,16 @@ ${effectiveRequest}`;
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs leading-5 text-[var(--muted)]">
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">connection {codexServerLabel}</span>
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">thread {codexServerThreadLabel}</span>
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">model {codexModelLabel}</span>
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">effort {codexEffortLabel}</span>
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">events {codexStream.eventCount}</span>
-            <span className="truncate rounded-xl bg-[var(--panel-2)] px-3 py-2 font-mono">threads {codexServerStatus?.threadCount ?? 0}</span>
+            <span className="truncate rounded bg-[var(--panel-2)] px-3 py-2 font-mono">connection {codexServerLabel}</span>
+            <span className="truncate rounded bg-[var(--panel-2)] px-3 py-2 font-mono">thread {codexServerThreadLabel}</span>
+            <span className="truncate rounded bg-[var(--panel-2)] px-3 py-2 font-mono">model {codexModelLabel}</span>
+            <span className="truncate rounded bg-[var(--panel-2)] px-3 py-2 font-mono">effort {codexEffortLabel}</span>
+            <span className="truncate rounded bg-[var(--panel-2)] px-3 py-2 font-mono">events {codexStream.eventCount}</span>
+            <span className="truncate rounded bg-[var(--panel-2)] px-3 py-2 font-mono">threads {codexServerStatus?.threadCount ?? 0}</span>
           </div>
 
           {codexRuntime === "app-server" && (codexStream.status !== "idle" || codexStream.text) ? (
-            <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--surface-dark)] p-3 text-white">
+            <div className="mt-4 rounded border border-[var(--line)] bg-[var(--surface-dark)] p-3 text-white">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs">
                 <span className="font-medium">{codexStream.status}</span>
                 <span className="truncate font-mono text-[var(--on-dark-muted)]">{codexStream.method || "app-server"}</span>
@@ -4507,7 +4507,7 @@ ${effectiveRequest}`;
           ) : null}
         </section>
 
-        <section data-comment-anchor="feature-list" className="mt-5 rounded-[22px] border border-[var(--line)] bg-white shadow-[0_12px_30px_rgba(31,41,55,0.04)]">
+        <section data-comment-anchor="feature-list" className="mt-5 rounded border border-[var(--line)] bg-white">
           <div className="border-b border-[var(--line)] p-4">
             <p className="text-sm font-semibold text-[var(--primary)]">design system</p>
             <h2 className="mt-2 text-xl font-bold tracking-normal text-[var(--ink-strong)]">문서 우선 상태</h2>
@@ -4542,7 +4542,7 @@ ${effectiveRequest}`;
             <h3 className="text-sm font-semibold text-[var(--ink-strong)]">컴포넌트 직접 수정</h3>
             <Badge tone={selectedAnchorId ? "lime" : selectionMode ? "cyan" : "steel"}>{selectedAnchorLabel}</Badge>
           </div>
-          <div className="rounded-[22px] border border-[var(--line)] bg-white p-4 shadow-[0_10px_24px_rgba(31,41,55,0.04)]">
+          <div className="rounded border border-[var(--line)] bg-white p-4">
             <div className="flex items-start gap-2 text-xs leading-5 text-[var(--muted)]">
               <MousePointer2 size={15} className="mt-0.5 shrink-0 text-[var(--accent)]" />
               <p>
@@ -4582,7 +4582,7 @@ ${effectiveRequest}`;
                     setSelectedTextDraft("");
                   }}
                   className={cn(
-                    "flex min-h-8 items-center justify-between gap-2 rounded-full px-3 text-left text-xs transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
+                    "flex min-h-8 items-center justify-between gap-2 rounded px-3 text-left text-xs transition focus:outline-none focus:ring-4 focus:ring-[var(--focus-ring)]",
                     selectedAnchorId === anchor.id ? "bg-[var(--primary)] text-white" : "text-[var(--charcoal)] hover:bg-[var(--panel-2)]",
                   )}
                 >
@@ -4593,7 +4593,7 @@ ${effectiveRequest}`;
             </div>
 
             {selectedAnchor || previewSelection ? (
-              <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3 text-[11px] leading-5 text-[var(--muted)]">
+              <div className="mt-3 rounded border border-[var(--line)] bg-[var(--panel-2)] p-3 text-[11px] leading-5 text-[var(--muted)]">
                 <div className="flex items-center justify-between gap-3">
                   <span className="truncate">{previewSelection?.screenLabel || selectedAnchor?.screenLabel}</span>
                   <span className="shrink-0 font-mono">{previewSelection?.tagName || `L${selectedAnchor?.line}`}</span>
@@ -4603,7 +4603,7 @@ ${effectiveRequest}`;
               </div>
             ) : null}
 
-            <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-[var(--panel-2)] p-3">
+            <div className="mt-3 rounded border border-[var(--line)] bg-[var(--panel-2)] p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium text-[var(--ink)]">선택 요소 직접 조정</p>
                 <Badge tone={previewSelection?.text ? "lime" : selectedAnchorId ? "cyan" : "steel"}>
@@ -4613,7 +4613,7 @@ ${effectiveRequest}`;
               <textarea
                 value={selectedTextDraft}
                 onChange={(event) => setSelectedTextDraft(event.target.value)}
-                className="mt-2 min-h-16 w-full resize-y rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs leading-5 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--focus-ring)]"
+                className="mt-2 min-h-16 w-full resize-y rounded border border-[var(--line)] bg-white px-3 py-2 text-xs leading-5 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--focus-ring)]"
                 placeholder="프리뷰에서 텍스트를 클릭하면 직접 수정할 수 있습니다. 줄바꿈도 그대로 입력하세요."
                 disabled={busy || !previewSelection?.text}
               />
@@ -4668,7 +4668,7 @@ ${effectiveRequest}`;
               id="component-edit"
               value={componentEdit}
               onChange={(event) => setComponentEdit(event.target.value)}
-              className="mt-2 min-h-28 w-full resize-none rounded-[18px] border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
+              className="mt-2 min-h-28 w-full resize-none rounded border border-[var(--line-strong)] bg-[var(--panel-2)] p-4 text-sm leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--mute)] focus:border-[var(--primary)] focus:bg-white focus:ring-4 focus:ring-[var(--focus-ring)]"
               placeholder="예: hero 문구만 더 짧게, CTA 색만 accent로 변경"
               disabled={busy}
             />
@@ -4685,7 +4685,7 @@ ${effectiveRequest}`;
 
         <section className="mt-5 grid gap-3" aria-label="파이프라인 단계">
           {steps.map((step) => (
-            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 rounded-[18px] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(31,41,55,0.035)]">
+            <div key={step.id} className="grid grid-cols-[14px_1fr_auto] gap-3 rounded border border-[var(--line)] bg-white px-3 py-3">
               <StepIcon status={step.status} />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-[var(--ink)]">{step.label}</p>
@@ -4703,7 +4703,7 @@ ${effectiveRequest}`;
           </div>
           <div className="grid gap-2">
             {visibleArtifacts.slice(0, 8).map((file) => (
-              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded-[18px] border border-[var(--line)] bg-white px-3 py-3">
+              <div key={file.relativePath} className="grid grid-cols-[18px_1fr] gap-2 rounded border border-[var(--line)] bg-white px-3 py-3">
                 {file.relativePath.endsWith(".md") ? <FileText size={14} /> : <Code2 size={14} />}
                 <span className="truncate font-mono text-xs text-[var(--ink)]">{file.relativePath}</span>
               </div>
@@ -4718,7 +4718,7 @@ ${effectiveRequest}`;
           </div>
           <div className="mt-3 grid gap-2">
             {verificationRows.map((check) => (
-              <div key={check.name} className="flex min-h-10 items-center justify-between gap-3 rounded-[16px] bg-white px-3 text-sm">
+              <div key={check.name} className="flex min-h-10 items-center justify-between gap-3 rounded border border-[var(--line)] bg-white px-3 text-sm">
                 <span className="text-[var(--charcoal)]">{check.name}</span>
                 <Badge tone={check.tone}>{check.value}</Badge>
               </div>
@@ -4808,20 +4808,20 @@ ${effectiveRequest}`;
 
 function StepIcon({ status }: { status: StepStatus }) {
   if (status === "done") return <CheckCircle2 size={14} className="mt-0.5 text-[var(--primary)]" />;
-  if (status === "error") return <XCircle size={14} className="mt-0.5 text-red-300" />;
+  if (status === "error") return <XCircle size={14} className="mt-0.5 text-[var(--danger)]" />;
   if (status === "active") return <Loader2 size={14} className="mt-0.5 animate-spin text-[var(--primary)]" />;
   return <Circle size={14} className="mt-0.5 text-[var(--mute)]" />;
 }
 
 function LogRow({ log }: { log: LogEvent }) {
   return (
-    <div className="rounded-xl border border-[#2a2a2a] bg-[var(--surface-dark)] p-3 text-white">
+    <div className="rounded border border-[var(--line-strong)] bg-[var(--surface-dark)] p-3 text-white">
       <div className="mb-1 flex items-center justify-between gap-2 text-xs">
         <span
           className={cn(
             "font-medium",
             log.level === "success" && "text-white",
-            log.level === "error" && "text-red-200",
+            log.level === "error" && "text-[var(--danger)]",
             log.level === "info" && "text-[var(--on-dark-muted)]",
           )}
         >

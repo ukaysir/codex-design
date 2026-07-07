@@ -1,0 +1,79 @@
+Task 10 image workspace contract stop-hook verification 3
+timestamp=2026-07-07T20:44:24.3019191+09:00
+pwd=C:\Users\CKIRUser\Downloads\codex-design-main\codex-design-main
+
+Original required command 1:
+rg -n "ima2|prompt enhancer|provider|history|queue|embedded|external service|selected design|performance" docs .omo/plans > .omo/evidence/task-10-image-workspace-contract.txt || true
+command1_exit=0
+
+Original required command 2:
+test -s docs/image-workspace-architecture.md && rg -n "embedded|prompt enhancer|provider abstraction|job queue|history|selected design slot|performance budget|not an external service|no disabled image UI" docs/image-workspace-architecture.md >> .omo/evidence/task-10-image-workspace-contract.txt
+command2_exit=0
+
+Original required command 3:
+rg -n "Image Workspace|coming soon|disabled image" src/App.tsx >> .omo/evidence/task-10-image-workspace-contract.txt || true
+command3_exit=0
+
+Explicit file and term checks:
+doc_exists=True
+doc_bytes=13100
+term_present[embedded]=True
+term_present[prompt enhancer]=True
+term_present[provider abstraction]=True
+term_present[job queue]=True
+term_present[history]=True
+term_present[selected design slot]=True
+term_present[performance budget]=True
+term_present[not an external service]=True
+term_present[no disabled image UI]=True
+term_present[design-context extraction]=True
+term_present[API-key boundary]=True
+term_present[asset library]=True
+term_present[insert-into-selected-slot flow]=True
+term_present[cancellation]=True
+term_present[progress]=True
+term_present[how Codex Design context becomes image prompts that match the current design language]=True
+
+Strict forbidden App UI scan:
+app_scan_exit=1
+<no matches>
+
+Required evidence file check:
+required_evidence_exists=True
+required_evidence_bytes=20427
+120:4. `prompt enhancer` produces an enhanced prompt and audit summary that explain why the image should fit the current design language.
+121:5. The job queue submits an `ImageJobRequest` through the provider abstraction.
+124:8. The user explicitly inserts the asset into the selected design slot.
+128:No generation result may silently replace a design asset. Insert requires an explicit selected design slot and an explicit user action.
+170:  history: {
+182:The performance budget exists because image work can easily block the design loop.
+184:- Opening a project with image history should not block the main workspace on thumbnail hydration.
+195:- under 250 ms to list the first page of history from project-local metadata;
+202:Logs may include job id, project id, selected design slot id, provider id, model, elapsed time, byte counts, dimensions, status code, and typed error code. Logs must not include raw API keys, OAuth tokens, private prompt history, raw generated base64, or raw upstream responses.
+207:- provider job queued/running/progress/completed/failed/canceled;
+209:- insertion applied to selected design slot;
+210:- history reconciled after restart.
+216:- Image Workspace remains embedded and not an external service.
+218:- Provider calls go through the provider abstraction.
+219:- Every generation goes through the job queue.
+220:- Prompt generation uses design-context extraction and a prompt enhancer.
+222:- History is project-local and separate from chat history.
+223:- Insert requires an explicit selected design slot.
+225:- The API-key boundary prevents credentials from entering project files, metadata, history, or logs.
+226:- The performance budget is verified with real project data before UI exposure.
+
+Scope check:
+?? .omo/drafts/
+?? .omo/evidence/task-10-image-workspace-contract-recheck.txt
+?? .omo/evidence/task-10-image-workspace-contract-stop-hook-2.txt
+?? .omo/evidence/task-10-image-workspace-contract-stop-hook-3.txt
+?? .omo/evidence/task-10-image-workspace-contract.txt
+?? .omo/research/
+?? docs/
+git_status_exit=0
+
+Judgment:
+missing_terms=
+PASS=True
+reason=all required commands ran, doc exists, every required term/concept is present, forbidden App UI scan has no matches, evidence files are non-empty
+sha256=A7E338AC6705B02D3467992EBF44FF51DEA7040CD4F01D9D07F03AE0CD79637B
